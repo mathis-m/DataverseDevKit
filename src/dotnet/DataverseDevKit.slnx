@@ -1,3 +1,18 @@
 <Solution>
-  <Project Path="DataverseDevKit.Host/DataverseDevKit.Host.csproj" />
+  <Folder Name="/Contracts/">
+    <Project Path="Contracts/DataverseDevKit.Contracts.csproj" />
+  </Folder>
+  <Folder Name="/FirstPartyPlugins/" />
+  <Folder Name="/FirstPartyPlugins/HelloWorld/">
+    <Project Path="FirstPartyPlugins/HelloWorld/Contoso.Ddk.HelloWorld.csproj" />
+  </Folder>
+  <Folder Name="/Host/">
+    <Project Path="Host/DataverseDevKit.Host.csproj" />
+  </Folder>
+  <Folder Name="/PluginRuntime/">
+    <Project Path="PluginRuntime/DataverseDevKit.PluginHost.csproj" />
+  </Folder>
+  <Folder Name="/Shared/">
+    <Project Path="Shared/DataverseDevKit.Shared.csproj" />
+  </Folder>
 </Solution>

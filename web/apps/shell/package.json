@@ -1,0 +1,32 @@
+{
+  "name": "@ddk/shell",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
+  },
+  "dependencies": {
+    "@ddk/host-sdk": "workspace:*",
+    "@ddk/ui-components": "workspace:*",
+    "@dnd-kit/react": "0.2.3",
+    "@fluentui/react-components": "^9.56.4",
+    "@fluentui/react-icons": "^2.0.272",
+    "@fluentui/react-context-selector": "^9.1.68",
+    "@originjs/vite-plugin-federation": "^1.3.6",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "~5.7.3",
+    "vite": "^6.0.7"
+  }
+}

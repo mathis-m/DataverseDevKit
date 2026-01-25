@@ -1,0 +1,29 @@
+* text=auto
+
+*.cs text diff=csharp
+*.csproj text
+*.sln text
+*.slnx text
+*.props text
+*.targets text
+
+*.ts text
+*.tsx text
+*.js text
+*.jsx text
+*.json text
+*.yml text
+*.yaml text
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+
+*.sh text eol=lf
+*.bash text eol=lf

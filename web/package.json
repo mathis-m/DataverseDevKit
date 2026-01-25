@@ -1,0 +1,24 @@
+{
+  "name": "@ddk/root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"pnpm run dev:sdk\" \"pnpm --filter @ddk/shell dev\"",
+    "dev:sdk": "pnpm --filter @ddk/host-sdk dev",
+    "build": "pnpm -r build",
+    "build:shell": "pnpm --filter @ddk/shell build",
+    "build:plugins": "pnpm --filter \"@ddk/plugin-*\" build",
+    "type-check": "pnpm -r type-check",
+    "lint": "pnpm -r lint"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "concurrently": "^9.1.0",
+    "typescript": "~5.7.3"
+  },
+  "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  }
+}

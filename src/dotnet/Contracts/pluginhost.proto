@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+option csharp_namespace = "DataverseDevKit.PluginHost.Contracts";
+
+package pluginhost;
+
+// Plugin host service for out-of-process plugin workers
+service PluginHostService {
+  // Initialize the plugin
+  rpc Initialize (InitializeRequest) returns (InitializeResponse);
+  
+  // Get available commands
+  rpc GetCommands (GetCommandsRequest) returns (GetCommandsResponse);
+  
+  // Execute a command
+  rpc Execute (ExecuteRequest) returns (ExecuteResponse);
+  
+  // Subscribe to plugin events (server streaming)
+  rpc SubscribeEvents (SubscribeEventsRequest) returns (stream PluginEvent);
+  
+  // Shutdown the plugin gracefully
+  rpc Shutdown (ShutdownRequest) returns (ShutdownResponse);
+}
+
+message InitializeRequest {
+  string plugin_id = 1;
+  string storage_path = 2;
+  map<string, string> config = 3;
+}
+
+message InitializeResponse {
+  bool success = 1;
+  string error_message = 2;
+  string plugin_name = 3;
+  string plugin_version = 4;
+}
+
+message GetCommandsRequest {
+}
+
+message GetCommandsResponse {
+  repeated Command commands = 1;
+}
+
+message Command {
+  string name = 1;
+  string label = 2;
+  string description = 3;
+  string payload_schema = 4;
+}
+
+message ExecuteRequest {
+  string command_name = 1;
+  string payload = 2;
+  string correlation_id = 3;
+}
+
+message ExecuteResponse {
+  bool success = 1;
+  string result = 2;
+  string error_message = 3;
+  string correlation_id = 4;
+}
+
+message SubscribeEventsRequest {
+  repeated string event_types = 1;
+}
+
+message PluginEvent {
+  string type = 1;
+  string payload = 2;
+  int64 timestamp = 3;
+  map<string, string> metadata = 4;
+}
+
+message ShutdownRequest {
+}
+
+message ShutdownResponse {
+  bool success = 1;
+}

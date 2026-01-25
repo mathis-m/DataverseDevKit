@@ -1,0 +1,24 @@
+{
+  "name": "@ddk/host-sdk",
+  "version": "1.0.0",
+  "description": "TypeScript SDK for Dataverse DevKit plugin developers",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "type-check": "tsc --noEmit",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "~5.7.3"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "id": "com.contoso.ddk.helloworld",
+  "name": "Hello World",
+  "version": "1.0.0",
+  "description": "A demonstration plugin showcasing basic DevKit capabilities including echo commands, time retrieval, and event streaming",
+  "author": "Contoso",
+  "company": "Contoso",
+  "category": "demo",
+  "icon": "🌍",
+  "backend": {
+    "assembly": "Contoso.Ddk.HelloWorld.dll",
+    "entryPoint": "Contoso.Ddk.HelloWorld.HelloWorldPlugin"
+  },
+  "ui": {
+    "type": "module-federation",
+    "remoteEntry": "./ui/remoteEntry.js",
+    "devServer": "http://localhost:5174",
+    "module": "./Plugin",
+    "scope": "helloWorldPlugin"
+  },
+  "permissions": {
+    "dataverse": ["read"],
+    "storage": ["read", "write"]
+  }
+}

@@ -1,0 +1,111 @@
+// JSON-RPC types
+export interface JsonRpcRequest {
+  jsonrpc: '2.0';
+  id: string | number;
+  method: string;
+  params?: unknown;
+}
+
+export interface JsonRpcResponse<T = unknown> {
+  jsonrpc: '2.0';
+  id: string | number;
+  result?: T;
+  error?: JsonRpcError;
+}
+
+export interface JsonRpcError {
+  code: number;
+  message: string;
+  data?: unknown;
+}
+
+// Connection types
+export interface ConnectionInfo {
+  id: string;
+  name: string;
+  url: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface AddConnectionParams {
+  name: string;
+  url: string;
+  authType: 'OAuth' | 'ClientSecret';
+  clientId?: string;
+  clientSecret?: string;
+  tenantId?: string;
+}
+
+// Plugin types
+export interface PluginMetadata {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  category: string;
+  company?: string;
+  icon?: string;
+  commands: PluginCommand[];
+  uiEntry: string;
+  isRunning: boolean;
+}
+
+export interface PluginCommand {
+  name: string;
+  label: string;
+  description: string;
+  payloadSchema?: Record<string, unknown>;
+}
+
+export interface PluginInstance {
+  instanceId: string;
+  pluginId: string;
+  connectionId: string | null;
+  state: 'loading' | 'ready' | 'error';
+  title: string;
+}
+
+export interface ExecuteCommandParams {
+  pluginId: string;
+  command: string;
+  payload?: unknown;
+}
+
+export interface ExecuteCommandResult {
+  success: boolean;
+  result?: unknown;
+  error?: string;
+}
+
+// Event types
+export interface PluginEvent {
+  type: string;
+  pluginId: string;
+  payload: unknown;
+  timestamp: string;
+  metadata?: Record<string, unknown>;
+}
+
+export type EventCallback = (event: PluginEvent) => void;
+
+// Settings types
+export interface UserSettings {
+  theme: 'light' | 'dark' | 'system';
+  [key: string]: unknown;
+}
+
+// Dataverse types
+export interface QueryResult {
+  success: boolean;
+  data?: string;
+  recordCount: number;
+  error?: string;
+}
+
+export interface ExecuteResult {
+  success: boolean;
+  response?: string;
+  error?: string;
+}
