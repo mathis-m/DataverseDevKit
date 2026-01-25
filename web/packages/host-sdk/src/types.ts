@@ -49,6 +49,8 @@ export interface PluginMetadata {
   icon?: string;
   commands: PluginCommand[];
   uiEntry: string;
+  uiModule?: string;
+  uiScope?: string;
   isRunning: boolean;
 }
 

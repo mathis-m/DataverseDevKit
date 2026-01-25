@@ -1,5 +1,6 @@
 using DataverseDevKit.Host.Bridge;
 using Microsoft.Extensions.Logging;
+using System.Text.Encodings.Web;
 
 namespace DataverseDevKit.Host;
 
@@ -46,7 +47,9 @@ public partial class MainPage : ContentPage
             if (!string.IsNullOrEmpty(response))
             {
                 // Send response back to JavaScript via EvaluateJavaScriptAsync
-                var script = $"window.__ddkBridge?.handleResponse({response});";
+                // Use JavaScriptEncoder to properly escape the JSON string for JavaScript
+                var escapedResponse = JavaScriptEncoder.Default.Encode(response);
+                var script = $"window.__ddkBridge.handleResponse('{escapedResponse}');";
                 await hybridWebView.EvaluateJavaScriptAsync(script);
                 _logger.LogInformation("✅ Response sent successfully");
             }

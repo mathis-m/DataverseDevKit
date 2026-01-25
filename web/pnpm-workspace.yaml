@@ -2,3 +2,5 @@ packages:
   - 'packages/*'
   - 'apps/*'
   - 'plugins/first-party/*'
+  # Include plugin UIs from src/plugins for development access to @ddk/host-sdk
+  - '../src/plugins/*/ui'

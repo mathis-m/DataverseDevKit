@@ -132,8 +132,8 @@ export const Marketplace: React.FC = () => {
         title: plugin.name,
         connectionId: activeConnectionId || null,
         remoteEntry: plugin.uiEntry,
-        scope: 'helloWorldPlugin',
-        module: './Plugin',
+        scope: plugin.uiScope || 'unknownPlugin',
+        module: plugin.uiModule || './Plugin',
       });
     } catch (error) {
       console.error('Failed to launch plugin:', error);

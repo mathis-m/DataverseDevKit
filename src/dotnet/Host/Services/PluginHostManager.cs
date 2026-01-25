@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Encodings.Web;
 using Microsoft.Extensions.Logging;
 using Grpc.Net.Client;
 using DataverseDevKit.PluginHost.Contracts;
@@ -8,89 +9,49 @@ namespace DataverseDevKit.Host.Services;
 
 /// <summary>
 /// Manages out-of-process plugin worker lifecycle and communication.
+/// Each plugin instance runs in isolation with its own worker process.
 /// </summary>
 public sealed class PluginHostManager : IDisposable
 {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+
     private readonly ILogger<PluginHostManager> _logger;
     private readonly StorageService _storageService;
     private readonly Dictionary<string, PluginWorkerInfo> _workers = new();
     private readonly string _pluginsBasePath;
     private readonly HttpClient _httpClient;
+    private readonly object _lock = new();
+    
+    // Base URL for the MAUI
+    private const string BaseUrl = "https://0.0.0.1/";
 
     public PluginHostManager(ILogger<PluginHostManager> logger, StorageService storageService)
     {
         _logger = logger;
         _storageService = storageService;
-        
-        // Plugins are located in the plugins/first-party directory
+
+        // Plugins are located in wwwroot/plugins after build
         var appPath = AppContext.BaseDirectory;
-        _pluginsBasePath = Path.Combine(appPath, "..", "..", "..", "..", "..", "..", "..", "plugins", "first-party");
-        _pluginsBasePath = Path.GetFullPath(_pluginsBasePath);
+        _pluginsBasePath = Path.Combine(appPath, "wwwroot", "plugins");
+        
+        // Fallback to src/plugins for development
+        if (!Directory.Exists(_pluginsBasePath))
+        {
+            _pluginsBasePath = Path.Combine(appPath, "..", "..", "..", "..", "..", "plugins");
+            _pluginsBasePath = Path.GetFullPath(_pluginsBasePath);
+        }
 
         _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
 
         _logger.LogInformation("Plugins base path: {Path}", _pluginsBasePath);
     }
 
-    private async Task<string> ResolveUiEntryUrlAsync(string pluginId, UiInfo? uiInfo)
-    {
-        if (uiInfo == null)
-        {
-            return string.Empty;
-        }
-
-        // In development mode, use devServer if available and running
-        if (!string.IsNullOrEmpty(uiInfo.DevServer) && IsDevelopmentMode())
-        {
-            if (await IsDevServerRunningAsync(uiInfo.DevServer))
-            {
-                var remoteEntry = uiInfo.RemoteEntry ?? "remoteEntry.js";
-                // In dev mode, Vite serves the built module federation assets from /dist/assets/
-                var fileName = Path.GetFileName(remoteEntry);
-                var devUrl = $"{uiInfo.DevServer.TrimEnd('/')}/dist/assets/{fileName}";
-                _logger.LogInformation("Using dev server for plugin {PluginId}: {Url}", pluginId, devUrl);
-                return devUrl;
-            }
-            else
-            {
-                _logger.LogWarning("Dev server not accessible for plugin {PluginId} at {DevServer}, falling back to production mode", pluginId, uiInfo.DevServer);
-            }
-        }
-
-        // In production mode, use relative path served by backend
-        if (!string.IsNullOrEmpty(uiInfo.RemoteEntry))
-        {
-            var relativePath = uiInfo.RemoteEntry.TrimStart('.', '/');
-            // Files should be copied to wwwroot/plugins/{pluginId}/ui/ during build
-            return $"plugins/{pluginId}/{relativePath}";
-        }
-
-        return string.Empty;
-    }
-
-    private bool IsDevelopmentMode()
-    {
-        // Check if we're in development mode (could use environment variable or config)
-        var isDev = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development";
-        return isDev || Debugger.IsAttached; // Also consider debug mode as dev
-    }
-
-    private async Task<bool> IsDevServerRunningAsync(string devServerUrl)
-    {
-        try
-        {
-            // Make a HEAD request to check if the server is accessible
-            using var request = new HttpRequestMessage(HttpMethod.Head, devServerUrl);
-            using var response = await _httpClient.SendAsync(request);
-            return response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.NotFound;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Dev server check failed for {Url}", devServerUrl);
-            return false;
-        }
-    }
-
+    /// <summary>
+    /// Lists all available plugins from the plugins directory.
+    /// </summary>
     public async Task<List<PluginInfo>> ListPluginsAsync()
     {
         var plugins = new List<PluginInfo>();
@@ -104,7 +65,7 @@ public sealed class PluginHostManager : IDisposable
         foreach (var pluginDir in Directory.GetDirectories(_pluginsBasePath))
         {
             var manifestPath = Path.Combine(pluginDir, "plugin.manifest.json");
-            
+
             if (!File.Exists(manifestPath))
             {
                 continue;
@@ -112,29 +73,27 @@ public sealed class PluginHostManager : IDisposable
 
             try
             {
-                var manifestJson = await File.ReadAllTextAsync(manifestPath);
-                var manifest = JsonSerializer.Deserialize<PluginManifest>(manifestJson, new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                });
+                var manifest = await LoadManifestAsync(manifestPath);
+                if (manifest == null) continue;
 
-                if (manifest != null)
+                var uiEntry = await ResolveUiEntryUrlAsync(manifest, pluginDir);
+
+                plugins.Add(new PluginInfo
                 {
-                    plugins.Add(new PluginInfo
-                    {
-                        Id = manifest.Id,
-                        Name = manifest.Name,
-                        Version = manifest.Version,
-                        Description = manifest.Description,
-                        Author = manifest.Author ?? "Unknown",
-                        Category = manifest.Category ?? "other",
-                        Company = manifest.Company,
-                        Icon = manifest.Icon,
-                        Commands = new List<PluginCommand>(), // Will be populated on demand
-                        UiEntry = await ResolveUiEntryUrlAsync(manifest.Id, manifest.Ui),
-                        IsRunning = _workers.ContainsKey(manifest.Id)
-                    });
-                }
+                    Id = manifest.Id,
+                    Name = manifest.Name,
+                    Version = manifest.Version,
+                    Description = manifest.Description,
+                    Author = manifest.Author ?? "Unknown",
+                    Category = manifest.Category ?? "other",
+                    Company = manifest.Company,
+                    Icon = manifest.Icon,
+                    Commands = new List<PluginCommand>(),
+                    UiEntry = uiEntry,
+                    UiModule = manifest.Ui?.Module,
+                    UiScope = manifest.Ui?.Scope,
+                    IsRunning = HasRunningInstance(manifest.Id)
+                });
             }
             catch (Exception ex)
             {
@@ -145,12 +104,182 @@ public sealed class PluginHostManager : IDisposable
         return plugins;
     }
 
-    public async Task<List<PluginCommand>> GetPluginCommandsAsync(string pluginId)
+    /// <summary>
+    /// Resolves the UI entry URL from the manifest.
+    /// Uses devEntry in development mode if available, otherwise uses entry.
+    /// </summary>
+    private async Task<string> ResolveUiEntryUrlAsync(PluginManifest manifest, string pluginDir)
     {
-        var worker = await EnsurePluginWorkerAsync(pluginId);
-        
-        var request = new GetCommandsRequest();
-        var response = await worker.Client.GetCommandsAsync(request);
+        if (manifest.Ui == null)
+        {
+            return string.Empty;
+        }
+
+        // In development mode, prefer devEntry if it's available (server is running)
+        if (IsDevelopmentMode() && !string.IsNullOrEmpty(manifest.Ui.DevEntry))
+        {
+            if (await IsDevServerAvailableAsync(manifest.Ui.DevEntry))
+            {
+                _logger.LogInformation("Using dev server for plugin UI: {DevEntry}", manifest.Ui.DevEntry);
+                return manifest.Ui.DevEntry;
+            }
+            _logger.LogDebug("Dev server not available at {DevEntry}, falling back to production entry", manifest.Ui.DevEntry);
+        }
+
+        // Production mode: resolve relative path against base URL
+        if (!string.IsNullOrEmpty(manifest.Ui.Entry))
+        {
+            var pluginName = Path.GetFileName(pluginDir);
+            var relativePath = $"plugins/{pluginName}/{manifest.Ui.Entry.TrimStart('.', '/')}";
+            var fullUrl = new Uri(new Uri(BaseUrl), relativePath).ToString();
+            _logger.LogDebug("Resolved plugin UI entry: {FullUrl}", fullUrl);
+            return fullUrl;
+        }
+
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// Checks if a dev server is available by sending a HEAD request.
+    /// </summary>
+    private async Task<bool> IsDevServerAvailableAsync(string url)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Head, url);
+            using var response = await _httpClient.SendAsync(request);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Dev server check failed for {Url}", url);
+            return false;
+        }
+    }
+
+    private bool IsDevelopmentMode()
+    {
+        var isDev = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development";
+        return isDev || Debugger.IsAttached;
+    }
+
+    /// <summary>
+    /// Starts a new plugin instance with isolation.
+    /// </summary>
+    /// <param name="pluginId">The plugin ID to start.</param>
+    /// <param name="instanceId">Unique instance ID for isolation (e.g., tab ID).</param>
+    /// <returns>Information about the started plugin instance.</returns>
+    public async Task<PluginInstanceInfo> StartPluginInstanceAsync(string pluginId, string instanceId)
+    {
+        var workerKey = GetWorkerKey(pluginId, instanceId);
+
+        lock (_lock)
+        {
+            if (_workers.TryGetValue(workerKey, out var existing))
+            {
+                return new PluginInstanceInfo
+                {
+                    PluginId = pluginId,
+                    InstanceId = instanceId,
+                    IsNew = false
+                };
+            }
+        }
+
+        _logger.LogInformation("Starting plugin instance: {PluginId} (instance: {InstanceId})", pluginId, instanceId);
+
+        var (manifest, pluginDir) = await FindPluginAsync(pluginId);
+
+        // Generate socket path - Host controls this
+        var socketPath = GenerateSocketPath(pluginId, instanceId);
+
+        // Ensure socket directory exists and clean up old socket
+        var socketDir = Path.GetDirectoryName(socketPath);
+        if (!string.IsNullOrEmpty(socketDir) && !Directory.Exists(socketDir))
+        {
+            Directory.CreateDirectory(socketDir);
+        }
+        if (File.Exists(socketPath))
+        {
+            File.Delete(socketPath);
+        }
+
+        // Locate executables and assemblies
+        var pluginHostExe = FindPluginHostExecutable();
+        var assemblyPath = ResolveAssemblyPath(manifest, pluginDir);
+        var storagePath = _storageService.GetPluginStoragePath($"{pluginId}/{instanceId}");
+
+        // Start worker process with all configuration passed as arguments
+        var worker = await StartWorkerProcessAsync(
+            pluginHostExe,
+            assemblyPath,
+            socketPath,
+            pluginId,
+            instanceId,
+            storagePath);
+
+        lock (_lock)
+        {
+            _workers[workerKey] = worker;
+        }
+
+        return new PluginInstanceInfo
+        {
+            PluginId = pluginId,
+            InstanceId = instanceId,
+            IsNew = true
+        };
+    }
+
+    /// <summary>
+    /// Stops a plugin instance.
+    /// </summary>
+    public async Task StopPluginInstanceAsync(string pluginId, string instanceId)
+    {
+        var workerKey = GetWorkerKey(pluginId, instanceId);
+
+        PluginWorkerInfo? worker;
+        lock (_lock)
+        {
+            if (!_workers.TryGetValue(workerKey, out worker))
+            {
+                return;
+            }
+            _workers.Remove(workerKey);
+        }
+
+        _logger.LogInformation("Stopping plugin instance: {PluginId} (instance: {InstanceId})", pluginId, instanceId);
+
+        try
+        {
+            // Request graceful shutdown
+            await worker.Client.ShutdownAsync(new ShutdownRequest());
+            
+            // Wait for process to exit
+            if (!worker.Process.WaitForExit(3000))
+            {
+                worker.Process.Kill();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error during graceful shutdown, forcing kill");
+            try { worker.Process.Kill(); } catch { }
+        }
+        finally
+        {
+            CleanupWorker(worker);
+        }
+    }
+
+    /// <summary>
+    /// Gets commands available from a plugin instance.
+    /// </summary>
+    public async Task<List<PluginCommand>> GetPluginCommandsAsync(string pluginId, string instanceId)
+    {
+        var worker = await EnsurePluginWorkerAsync(pluginId, instanceId);
+
+        var response = await worker.Client.GetCommandsAsync(new GetCommandsRequest());
 
         return response.Commands.Select(c => new PluginCommand
         {
@@ -160,10 +289,13 @@ public sealed class PluginHostManager : IDisposable
         }).ToList();
     }
 
-    public async Task<string> InvokePluginCommandAsync(string pluginId, string command, string payload)
+    /// <summary>
+    /// Invokes a command on a plugin instance.
+    /// </summary>
+    public async Task<JsonElement> InvokePluginCommandAsync(string pluginId, string instanceId, string command, string payload)
     {
-        var worker = await EnsurePluginWorkerAsync(pluginId);
-        
+        var worker = await EnsurePluginWorkerAsync(pluginId, instanceId);
+
         var correlationId = Guid.NewGuid().ToString();
         var request = new ExecuteRequest
         {
@@ -172,7 +304,8 @@ public sealed class PluginHostManager : IDisposable
             CorrelationId = correlationId
         };
 
-        _logger.LogInformation("Invoking plugin command: {PluginId}.{Command}", pluginId, command);
+        _logger.LogInformation("Invoking plugin command: {PluginId}.{Command} (instance: {InstanceId})", 
+            pluginId, command, instanceId);
 
         var response = await worker.Client.ExecuteAsync(request);
 
@@ -181,166 +314,167 @@ public sealed class PluginHostManager : IDisposable
             throw new InvalidOperationException($"Plugin command failed: {response.ErrorMessage}");
         }
 
-        return response.Result;
+        // Deserialize bytes to JsonElement to avoid double JSON encoding
+        var resultJson = response.Result.ToStringUtf8();
+        return JsonSerializer.Deserialize<JsonElement>(resultJson, JsonOptions);
     }
 
-    private async Task<PluginWorkerInfo> EnsurePluginWorkerAsync(string pluginId)
+    // Legacy methods for backward compatibility (default instance)
+    public Task<List<PluginCommand>> GetPluginCommandsAsync(string pluginId) 
+        => GetPluginCommandsAsync(pluginId, "default");
+
+    public Task<JsonElement> InvokePluginCommandAsync(string pluginId, string command, string payload) 
+        => InvokePluginCommandAsync(pluginId, "default", command, payload);
+
+    private string GetWorkerKey(string pluginId, string instanceId) => $"{pluginId}::{instanceId}";
+
+    private bool HasRunningInstance(string pluginId)
     {
-        if (_workers.TryGetValue(pluginId, out var existingWorker))
+        lock (_lock)
         {
-            return existingWorker;
+            return _workers.Keys.Any(k => k.StartsWith($"{pluginId}::"));
         }
-
-        return await StartPluginWorkerAsync(pluginId);
     }
 
-    private async Task<PluginWorkerInfo> StartPluginWorkerAsync(string pluginId)
+    private async Task<PluginWorkerInfo> EnsurePluginWorkerAsync(string pluginId, string instanceId)
     {
-        _logger.LogInformation("Starting plugin worker: {PluginId}", pluginId);
+        var workerKey = GetWorkerKey(pluginId, instanceId);
 
-        // Load manifest - find the plugin directory by searching for matching manifest
-        string? pluginDir = null;
-        string? manifestPath = null;
-
-        if (Directory.Exists(_pluginsBasePath))
+        lock (_lock)
         {
-            foreach (var dir in Directory.GetDirectories(_pluginsBasePath))
+            if (_workers.TryGetValue(workerKey, out var existing))
             {
-                var testManifestPath = Path.Combine(dir, "plugin.manifest.json");
-                if (File.Exists(testManifestPath))
-                {
-                    var testManifestJson = await File.ReadAllTextAsync(testManifestPath);
-                    var testManifest = JsonSerializer.Deserialize<PluginManifest>(testManifestJson, new JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true
-                    });
-
-                    if (testManifest?.Id == pluginId)
-                    {
-                        pluginDir = dir;
-                        manifestPath = testManifestPath;
-                        break;
-                    }
-                }
+                return existing;
             }
         }
-        
-        if (pluginDir == null || manifestPath == null || !File.Exists(manifestPath))
+
+        await StartPluginInstanceAsync(pluginId, instanceId);
+
+        lock (_lock)
         {
-            throw new FileNotFoundException($"Plugin manifest not found for plugin: {pluginId}");
+            return _workers[workerKey];
+        }
+    }
+
+    private string GenerateSocketPath(string pluginId, string instanceId)
+    {
+        var sanitizedPluginId = pluginId.Replace(".", "-", StringComparison.Ordinal);
+        var sanitizedInstanceId = instanceId.Replace(".", "-", StringComparison.Ordinal).Replace("/", "-", StringComparison.Ordinal);
+        var pid = Environment.ProcessId;
+
+        return OperatingSystem.IsWindows()
+            ? Path.Combine(Path.GetTempPath(), $"ddk-{pid}-{sanitizedPluginId}-{sanitizedInstanceId}.sock")
+            : $"/tmp/ddk/{pid}/{sanitizedPluginId}-{sanitizedInstanceId}.sock";
+    }
+
+    private async Task<(PluginManifest manifest, string pluginDir)> FindPluginAsync(string pluginId)
+    {
+        if (!Directory.Exists(_pluginsBasePath))
+        {
+            throw new DirectoryNotFoundException($"Plugins directory not found: {_pluginsBasePath}");
         }
 
-        var manifestJson = await File.ReadAllTextAsync(manifestPath);
-        var manifest = JsonSerializer.Deserialize<PluginManifest>(manifestJson, new JsonSerializerOptions
+        foreach (var dir in Directory.GetDirectories(_pluginsBasePath))
+        {
+            var manifestPath = Path.Combine(dir, "plugin.manifest.json");
+            if (!File.Exists(manifestPath)) continue;
+
+            var manifest = await LoadManifestAsync(manifestPath);
+            if (manifest?.Id == pluginId)
+            {
+                return (manifest, dir);
+            }
+        }
+
+        throw new FileNotFoundException($"Plugin not found: {pluginId}");
+    }
+
+    private async Task<PluginManifest?> LoadManifestAsync(string manifestPath)
+    {
+        var json = await File.ReadAllTextAsync(manifestPath);
+        return JsonSerializer.Deserialize<PluginManifest>(json, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         });
+    }
 
-        if (manifest?.Backend?.EntryAssembly == null && manifest?.Backend?.Assembly == null)
+    private string FindPluginHostExecutable()
+    {
+        // Check alongside the host application
+        var candidates = new[]
         {
-            throw new InvalidOperationException($"Invalid plugin manifest for: {pluginId}");
-        }
+            Path.Combine(AppContext.BaseDirectory, "DataverseDevKit.PluginHost.exe"),
+            Path.Combine(AppContext.BaseDirectory, "DataverseDevKit.PluginHost"),
+        };
 
-        // Locate plugin host executable
-        var pluginHostExe = Path.Combine(AppContext.BaseDirectory, "DataverseDevKit.PluginHost.exe");
-        
-        if (!File.Exists(pluginHostExe))
+        foreach (var path in candidates)
         {
-            pluginHostExe = Path.Combine(AppContext.BaseDirectory, "DataverseDevKit.PluginHost");
-        }
-        
-        // If not in the same directory, look in the PluginRuntime build output (for development)
-        if (!File.Exists(pluginHostExe))
-        {
-            var pluginRuntimePath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..", "..", "src", "dotnet", "PluginRuntime", "bin", "Debug");
-            pluginRuntimePath = Path.GetFullPath(pluginRuntimePath);
-            
-            if (Directory.Exists(pluginRuntimePath))
-            {
-                // Search for the executable in all subdirectories
-                var foundExes = Directory.GetFiles(pluginRuntimePath, "DataverseDevKit.PluginHost.exe", SearchOption.AllDirectories);
-                if (foundExes.Length > 0)
-                {
-                    pluginHostExe = foundExes[0];
-                    _logger.LogInformation("Found PluginHost at: {Path}", pluginHostExe);
-                }
-            }
-        }
-        
-        if (!File.Exists(pluginHostExe))
-        {
-            throw new FileNotFoundException($"Plugin host executable not found. Expected at: {pluginHostExe}");
+            if (File.Exists(path)) return path;
         }
 
-        // Locate plugin assembly
-        var assemblyName = manifest.Backend.Assembly ?? manifest.Backend.EntryAssembly;
+        // Development fallback: search in PluginRuntime build output
+        var devPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", "..", "..", "PluginRuntime", "bin"));
+
+        if (Directory.Exists(devPath))
+        {
+            var found = Directory.GetFiles(devPath, "DataverseDevKit.PluginHost.exe", SearchOption.AllDirectories)
+                .FirstOrDefault();
+            if (found != null) return found;
+
+            found = Directory.GetFiles(devPath, "DataverseDevKit.PluginHost", SearchOption.AllDirectories)
+                .FirstOrDefault();
+            if (found != null) return found;
+        }
+
+        throw new FileNotFoundException("Plugin host executable not found");
+    }
+
+    private string ResolveAssemblyPath(PluginManifest manifest, string pluginDir)
+    {
+        var assemblyName = manifest.Backend?.Assembly;
         if (string.IsNullOrEmpty(assemblyName))
         {
-            throw new InvalidOperationException($"Plugin manifest does not specify an assembly for: {pluginId}");
-        }
-        
-        // First try in the plugin directory (for deployed plugins)
-        var assemblyPath = Path.Combine(pluginDir, assemblyName);
-        
-        // If not found, search in the .NET build output directories (for development)
-        if (!File.Exists(assemblyPath))
-        {
-            var dotnetPluginsPath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..", "..", "src", "dotnet", "FirstPartyPlugins");
-            dotnetPluginsPath = Path.GetFullPath(dotnetPluginsPath);
-            
-            if (Directory.Exists(dotnetPluginsPath))
-            {
-                // Search for the assembly in all subdirectories
-                foreach (var dir in Directory.GetDirectories(dotnetPluginsPath))
-                {
-                    var binDir = Path.Combine(dir, "bin");
-                    if (Directory.Exists(binDir))
-                    {
-                        var foundFiles = Directory.GetFiles(binDir, assemblyName, SearchOption.AllDirectories);
-                        if (foundFiles.Length > 0)
-                        {
-                            // Prefer Debug build, then Release
-                            assemblyPath = foundFiles.FirstOrDefault(f => f.Contains("Debug", StringComparison.OrdinalIgnoreCase)) ?? foundFiles[0];
-                            break;
-                        }
-                    }
-                }
-            }
+            throw new InvalidOperationException($"Plugin manifest does not specify an assembly: {manifest.Id}");
         }
 
-        assemblyPath = Path.GetFullPath(assemblyPath);
+        // Resolve relative to plugin directory
+        var assemblyPath = Path.GetFullPath(Path.Combine(pluginDir, assemblyName));
 
         if (!File.Exists(assemblyPath))
         {
             throw new FileNotFoundException($"Plugin assembly not found: {assemblyPath}");
         }
-        
-        _logger.LogInformation("Found plugin assembly: {AssemblyPath}", assemblyPath);
 
-        // Get storage path
-        var storagePath = _storageService.GetPluginStoragePath(pluginId);
+        _logger.LogInformation("Resolved plugin assembly: {AssemblyPath}", assemblyPath);
+        return assemblyPath;
+    }
 
-        // Start worker process
+    private async Task<PluginWorkerInfo> StartWorkerProcessAsync(
+        string pluginHostExe,
+        string assemblyPath,
+        string socketPath,
+        string pluginId,
+        string instanceId,
+        string storagePath)
+    {
+        // Pass all configuration via command line arguments for clarity and control
         var psi = new ProcessStartInfo
         {
             FileName = pluginHostExe,
+            Arguments = $"--socket \"{socketPath}\" --assembly \"{assemblyPath}\" --plugin-id \"{pluginId}\" --instance-id \"{instanceId}\"",
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true
         };
 
-        psi.Environment["DDK_PLUGIN_ID"] = pluginId;
-        psi.Environment["DDK_PLUGIN_ASSEMBLY"] = assemblyPath;
-        psi.Environment["DDK_TRANSPORT"] = "uds";
+        _logger.LogInformation("Starting plugin worker: {Exe} {Args}", pluginHostExe, psi.Arguments);
 
-        var process = Process.Start(psi);
-        if (process == null)
-        {
-            throw new InvalidOperationException("Failed to start plugin worker process");
-        }
+        var process = Process.Start(psi) 
+            ?? throw new InvalidOperationException("Failed to start plugin worker process");
 
-        // Start reading stderr in background to capture any errors
+        // Capture stderr in background
         var errorOutput = new System.Text.StringBuilder();
         _ = Task.Run(async () =>
         {
@@ -352,35 +486,27 @@ public sealed class PluginHostManager : IDisposable
             }
         });
 
-        // Read socket path from stdout with timeout
-        var socketPath = string.Empty;
-        var readTask = process.StandardOutput.ReadLineAsync();
-        var timeoutTask = Task.Delay(5000);
-        var completedTask = await Task.WhenAny(readTask, timeoutTask);
-        
-        if (completedTask == timeoutTask)
+        // Wait for READY signal
+        var readyTask = WaitForReadySignalAsync(process.StandardOutput);
+        var timeoutTask = Task.Delay(10000);
+
+        if (await Task.WhenAny(readyTask, timeoutTask) == timeoutTask)
         {
             process.Kill();
-            var errors = errorOutput.ToString();
-            throw new InvalidOperationException($"Timeout waiting for socket path from plugin worker. Stderr: {errors}");
-        }
-        
-        var outputLine = await readTask;
-        
-        if (outputLine?.StartsWith("SOCKET_PATH=") == true)
-        {
-            socketPath = outputLine.Substring("SOCKET_PATH=".Length);
-            _logger.LogInformation("Plugin worker socket: {SocketPath}", socketPath);
-        }
-        else
-        {
-            process.Kill();
-            var errors = errorOutput.ToString();
-            throw new InvalidOperationException($"Failed to get socket path from plugin worker. Output: '{outputLine}'. Stderr: {errors}");
+            throw new TimeoutException($"Plugin worker failed to start. Stderr: {errorOutput}");
         }
 
-        // Wait a moment for the server to start
-        await Task.Delay(500);
+        var ready = await readyTask;
+        if (!ready)
+        {
+            process.Kill();
+            throw new InvalidOperationException($"Plugin worker signaled failure. Stderr: {errorOutput}");
+        }
+
+        _logger.LogInformation("Plugin worker ready, connecting to socket: {SocketPath}", socketPath);
+
+        // Allow socket to be created
+        await Task.Delay(200);
 
         // Connect via gRPC
         var channel = GrpcChannel.ForAddress("http://localhost", new GrpcChannelOptions
@@ -405,20 +531,24 @@ public sealed class PluginHostManager : IDisposable
             throw new InvalidOperationException($"Plugin initialization failed: {initResponse.ErrorMessage}");
         }
 
-        _logger.LogInformation("Plugin worker started: {PluginName} v{Version}", initResponse.PluginName, initResponse.PluginVersion);
+        _logger.LogInformation("Plugin instance started: {PluginName} v{Version} (instance: {InstanceId})",
+            initResponse.PluginName, initResponse.PluginVersion, instanceId);
 
-        var worker = new PluginWorkerInfo
+        return new PluginWorkerInfo
         {
             PluginId = pluginId,
+            InstanceId = instanceId,
             Process = process,
             Client = client,
             Channel = channel,
             SocketPath = socketPath
         };
+    }
 
-        _workers[pluginId] = worker;
-
-        return worker;
+    private static async Task<bool> WaitForReadySignalAsync(StreamReader stdout)
+    {
+        var line = await stdout.ReadLineAsync();
+        return line == "READY";
     }
 
     private static SocketsHttpHandler CreateUnixSocketHandler(string socketPath)
@@ -440,32 +570,56 @@ public sealed class PluginHostManager : IDisposable
         };
     }
 
+    private void CleanupWorker(PluginWorkerInfo worker)
+    {
+        try
+        {
+            worker.Channel?.Dispose();
+            worker.Process?.Dispose();
+
+            if (File.Exists(worker.SocketPath))
+            {
+                File.Delete(worker.SocketPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error cleaning up worker for plugin {PluginId}", worker.PluginId);
+        }
+    }
+
     public void Dispose()
     {
         _httpClient?.Dispose();
-        
-        // Clean up any running workers
-        foreach (var worker in _workers.Values)
+
+        List<PluginWorkerInfo> workers;
+        lock (_lock)
+        {
+            workers = _workers.Values.ToList();
+            _workers.Clear();
+        }
+
+        foreach (var worker in workers)
         {
             try
             {
-                worker.Channel?.Dispose();
                 if (!worker.Process.HasExited)
                 {
                     worker.Process.Kill();
                 }
-                worker.Process.Dispose();
+                CleanupWorker(worker);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error disposing worker for plugin {PluginId}", worker.PluginId);
             }
         }
-        _workers.Clear();
-        
+
         GC.SuppressFinalize(this);
     }
 }
+
+// ==== DTOs and Models ====
 
 public record PluginInfo
 {
@@ -479,6 +633,8 @@ public record PluginInfo
     public string? Icon { get; init; }
     public required IReadOnlyList<PluginCommand> Commands { get; init; }
     public required string UiEntry { get; init; }
+    public string? UiModule { get; init; }
+    public string? UiScope { get; init; }
     public bool IsRunning { get; init; }
 }
 
@@ -489,9 +645,17 @@ public record PluginCommand
     public string? Description { get; init; }
 }
 
+public record PluginInstanceInfo
+{
+    public required string PluginId { get; init; }
+    public required string InstanceId { get; init; }
+    public bool IsNew { get; init; }
+}
+
 internal record PluginWorkerInfo
 {
     public required string PluginId { get; init; }
+    public required string InstanceId { get; init; }
     public required Process Process { get; init; }
     public required PluginHostService.PluginHostServiceClient Client { get; init; }
     public required GrpcChannel Channel { get; init; }
@@ -512,16 +676,10 @@ internal record PluginManifest
     public BackendInfo? Backend { get; init; }
 }
 
-internal record AuthorInfo
-{
-    public string? Name { get; init; }
-}
-
 internal record UiInfo
 {
     public string? Entry { get; init; }
-    public string? RemoteEntry { get; init; }
-    public string? DevServer { get; init; }
+    public string? DevEntry { get; init; }
     public string? Module { get; init; }
     public string? Scope { get; init; }
 }
@@ -530,5 +688,4 @@ internal record BackendInfo
 {
     public string? Assembly { get; init; }
     public string? EntryPoint { get; init; }
-    public string? EntryAssembly { get; init; } // Legacy support
 }

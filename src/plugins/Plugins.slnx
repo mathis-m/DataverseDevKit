@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/sample-plugin/">
+    <Project Path="sample-plugin/src/Ddk.SamplePlugin.csproj" />
+  </Folder>
+</Solution>

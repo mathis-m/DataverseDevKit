@@ -1,3 +1,4 @@
+using System.Text.Json;
 using DataverseDevKit.Core.Models;
 
 namespace DataverseDevKit.Core.Abstractions;
@@ -40,8 +41,8 @@ public interface IToolPlugin
     /// <param name="commandName">The command to execute.</param>
     /// <param name="payload">The command payload (JSON serialized).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Command result (JSON serialized).</returns>
-    Task<string> ExecuteAsync(string commandName, string payload, CancellationToken cancellationToken = default);
+    /// <returns>Command result as JsonElement.</returns>
+    Task<JsonElement> ExecuteAsync(string commandName, string payload, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Disposes the plugin and releases resources.

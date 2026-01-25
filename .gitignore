@@ -75,8 +75,11 @@ yarn-error.log*
 # -------------------------
 # Plugin build artifacts
 # -------------------------
-plugins/first-party/*/ui/
-plugins/first-party/*/backend/
+# Plugin UI/backend outputs in dist folders
+src/plugins/*/dist/
+
+# Plugins copied to Host wwwroot during build
+src/dotnet/Host/wwwroot/plugins/
 
 # -------------------------
 # Environment & Config

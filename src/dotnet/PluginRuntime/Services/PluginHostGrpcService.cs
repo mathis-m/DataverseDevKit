@@ -26,7 +26,10 @@ public class PluginHostGrpcService : PluginHostService.PluginHostServiceBase
             _logger.LogInformation("Initialize request for plugin: {PluginId}", request.PluginId);
 
             var config = new Dictionary<string, string>(request.Config);
-            await _pluginLoader.InitializePluginAsync(request.PluginId, request.StoragePath, config, context.CancellationToken);
+            
+            // Create a logger for the plugin context
+            var pluginLogger = _logger;
+            await _pluginLoader.InitializePluginAsync(request.PluginId, request.StoragePath, config, pluginLogger, context.CancellationToken);
 
             var plugin = _pluginLoader.Plugin;
 
@@ -83,10 +86,14 @@ public class PluginHostGrpcService : PluginHostService.PluginHostServiceBase
 
             var result = await _pluginLoader.Plugin.ExecuteAsync(request.CommandName, request.Payload, context.CancellationToken);
 
+            // Serialize JsonElement to bytes - only serialization happens here
+            var resultJson = System.Text.Json.JsonSerializer.Serialize(result);
+            var resultBytes = Google.Protobuf.ByteString.CopyFromUtf8(resultJson);
+
             return new ExecuteResponse
             {
                 Success = true,
-                Result = result,
+                Result = resultBytes,
                 CorrelationId = request.CorrelationId
             };
         }

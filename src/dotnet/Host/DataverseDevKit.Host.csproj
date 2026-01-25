@@ -62,4 +62,41 @@
 		<ProjectReference Include="..\Shared\DataverseDevKit.Shared.csproj" />
 	</ItemGroup>
 
+	<!-- Plugin Integration -->
+	<PropertyGroup>
+		<PluginsSourcePath>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\plugins'))</PluginsSourcePath>
+		<PluginsWwwrootPath>$(MSBuildProjectDirectory)\wwwroot\plugins</PluginsWwwrootPath>
+		<CopyPluginsScript>$(MSBuildProjectDirectory)\scripts\copy-plugins.ps1</CopyPluginsScript>
+	</PropertyGroup>
+
+	<!-- Build and copy plugins to wwwroot -->
+	<Target Name="BuildAndCopyPlugins" BeforeTargets="Build">
+		<Message Importance="high" Text="Building PluginHost..." />
+		
+		<!-- Build the PluginHost project -->
+		<Exec Command="dotnet build ..\PluginRuntime\DataverseDevKit.PluginHost.csproj --configuration $(Configuration)"
+		      WorkingDirectory="$(MSBuildProjectDirectory)"
+		      ContinueOnError="true" />
+		
+		<Message Importance="high" Text="Building plugins from: $(PluginsSourcePath)" />
+		
+		<!-- Build all plugins if solution exists -->
+		<Exec Command="dotnet build Plugins.slnx --configuration $(Configuration)"
+		      WorkingDirectory="$(PluginsSourcePath)"
+		      Condition="Exists('$(PluginsSourcePath)\Plugins.slnx')"
+		      ContinueOnError="true" />
+
+		<!-- Create plugins output directory -->
+		<MakeDir Directories="$(PluginsWwwrootPath)" />
+
+		<!-- Use PowerShell script for copying -->
+		<Exec Command="powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(CopyPluginsScript)&quot; -SourcePath &quot;$(PluginsSourcePath)&quot; -TargetPath &quot;$(PluginsWwwrootPath)&quot;"
+		      Condition="Exists('$(CopyPluginsScript)')" />
+	</Target>
+
+	<!-- Clean plugins from wwwroot -->
+	<Target Name="CleanPlugins" AfterTargets="Clean">
+		<RemoveDir Directories="$(PluginsWwwrootPath)" Condition="Exists('$(PluginsWwwrootPath)')" />
+	</Target>
+
 </Project>

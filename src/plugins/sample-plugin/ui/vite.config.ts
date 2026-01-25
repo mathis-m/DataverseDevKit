@@ -6,17 +6,17 @@ export default defineConfig({
   plugins: [
     react(),
     federation({
-      name: 'helloWorldPlugin',
+      name: 'samplePlugin',
       filename: 'remoteEntry.js',
       exposes: {
         './Plugin': './src/Plugin.tsx',
       },
       shared: {
-        react: { singleton: true, requiredVersion: '^18.3.1' },
-        'react-dom': { singleton: true, requiredVersion: '^18.3.1' },
-        '@fluentui/react-components': { singleton: true },
-        '@fluentui/react-icons': { singleton: true },
-        '@ddk/host-sdk': { singleton: true },
+        react: { requiredVersion: '^18.3.1' },
+        'react-dom': { requiredVersion: '^18.3.1' },
+        '@fluentui/react-components': {},
+        '@fluentui/react-icons': {},
+        '@ddk/host-sdk': {},
       },
     }),
   ],
@@ -31,7 +31,7 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5174,
+    port: 5175,
     strictPort: true,
     cors: true,
     headers: {

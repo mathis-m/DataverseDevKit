@@ -183,8 +183,8 @@ export class HostBridge {
     return this.sendRequest<PluginCommand[]>('plugin.getCommands', { pluginId });
   }
 
-  async invokePluginCommand(pluginId: string, command: string, payload?: string): Promise<string> {
-    return this.sendRequest<string>('plugin.invoke', { pluginId, command, payload: payload ?? '' });
+  async invokePluginCommand(pluginId: string, command: string, payload?: string): Promise<any> {
+    return this.sendRequest<any>('plugin.invoke', { pluginId, command, payload: payload ?? '' });
   }
 
   // Event subscription

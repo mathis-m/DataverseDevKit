@@ -1,5 +1,6 @@
 using System.Reflection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using DataverseDevKit.Core.Abstractions;
 
 namespace DataverseDevKit.PluginHost.Runtime;
@@ -9,17 +10,20 @@ namespace DataverseDevKit.PluginHost.Runtime;
 /// </summary>
 public class PluginLoader
 {
-    private readonly ILogger<PluginLoader> _logger;
+    private ILogger _logger = NullLogger.Instance;
     private IToolPlugin? _plugin;
     private IPluginContext? _context;
 
-    public PluginLoader(ILogger<PluginLoader> logger)
+    public IToolPlugin Plugin => _plugin ?? throw new InvalidOperationException("Plugin not loaded");
+    public IPluginContext Context => _context ?? throw new InvalidOperationException("Plugin not initialized");
+
+    /// <summary>
+    /// Sets the logger for this loader. Should be called after DI is available.
+    /// </summary>
+    public void SetLogger(ILogger logger)
     {
         _logger = logger;
     }
-
-    public IToolPlugin Plugin => _plugin ?? throw new InvalidOperationException("Plugin not loaded");
-    public IPluginContext Context => _context ?? throw new InvalidOperationException("Plugin not initialized");
 
     public async Task LoadPluginAsync(string assemblyPath, CancellationToken cancellationToken = default)
     {
@@ -55,7 +59,7 @@ public class PluginLoader
         _logger.LogInformation("Plugin instance created: {PluginId}", _plugin.PluginId);
     }
 
-    public async Task InitializePluginAsync(string pluginId, string storagePath, Dictionary<string, string> config, CancellationToken cancellationToken = default)
+    public async Task InitializePluginAsync(string pluginId, string storagePath, Dictionary<string, string> config, ILogger contextLogger, CancellationToken cancellationToken = default)
     {
         if (_plugin == null)
         {
@@ -64,8 +68,8 @@ public class PluginLoader
 
         _logger.LogInformation("Initializing plugin: {PluginId}", pluginId);
 
-        // Create context
-        _context = new PluginContextImpl(_logger, storagePath);
+        // Create context with provided logger
+        _context = new PluginContextImpl(contextLogger, storagePath);
 
         // Initialize plugin
         await _plugin.InitializeAsync(_context, cancellationToken);

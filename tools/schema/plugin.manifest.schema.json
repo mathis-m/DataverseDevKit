@@ -4,7 +4,7 @@
   "title": "Dataverse DevKit Plugin Manifest",
   "description": "Manifest schema for DDK plugins",
   "type": "object",
-  "required": ["id", "name", "version", "author", "description", "ui", "backend", "permissions"],
+  "required": ["id", "name", "version", "description"],
   "properties": {
     "id": {
       "type": "string",
@@ -23,21 +23,16 @@
       "description": "Semantic version (e.g., 1.0.0 or 1.0.0-beta.1)"
     },
     "author": {
-      "type": "object",
-      "required": ["name"],
-      "properties": {
-        "name": {
-          "type": "string"
-        },
-        "email": {
-          "type": "string",
-          "format": "email"
-        },
-        "url": {
-          "type": "string",
-          "format": "uri"
-        }
-      }
+      "type": "string",
+      "description": "Plugin author name"
+    },
+    "company": {
+      "type": "string",
+      "description": "Company or organization name"
+    },
+    "category": {
+      "type": "string",
+      "description": "Plugin category (e.g., development, productivity, integration)"
     },
     "description": {
       "type": "string",
@@ -50,31 +45,38 @@
       "description": "Path to plugin icon (relative to manifest)"
     },
     "ui": {
-      "type": "object",
-      "required": ["entry"],
+      "type": ["object", "null"],
+      "description": "UI configuration. Set to null if plugin has no UI.",
       "properties": {
         "entry": {
-          "type": "string",
-          "description": "Entry point for UI module (e.g., ui/remoteEntry.js)"
+          "type": ["string", "null"],
+          "description": "Relative path to UI entry point from plugin root (e.g., ui/remoteEntry.js). Null if no UI."
         },
-        "mount": {
+        "devEntry": {
           "type": "string",
-          "default": "mount",
-          "description": "Name of exported mount function"
+          "description": "Full URL to UI entry point for development (e.g., http://localhost:5174/dist/assets/remoteEntry.js)"
+        },
+        "module": {
+          "type": "string",
+          "description": "Module federation exposed module name (e.g., ./Plugin)"
+        },
+        "scope": {
+          "type": "string",
+          "description": "Module federation scope name"
         }
       }
     },
     "backend": {
-      "type": "object",
-      "required": ["entryAssembly"],
+      "type": ["object", "null"],
+      "description": "Backend configuration. Set to null if plugin has no backend.",
       "properties": {
-        "entryAssembly": {
+        "assembly": {
           "type": "string",
-          "description": "Path to plugin backend DLL (e.g., backend/MyPlugin.dll)"
+          "description": "Relative path to plugin backend DLL from plugin root (e.g., backend/MyPlugin.dll)"
         },
-        "runtimeVersion": {
+        "entryPoint": {
           "type": "string",
-          "description": "Target .NET runtime version (e.g., net10.0)"
+          "description": "Fully qualified type name of the plugin class (e.g., MyNamespace.MyPlugin)"
         }
       }
     },
