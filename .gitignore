@@ -1,0 +1,98 @@
+
+# -------------------------
+# OS-specific
+# -------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# -------------------------
+# Node / pnpm
+# -------------------------
+**/node_modules/
+.pnpm-store/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Vite build outputs
+**/dist/
+**/build/
+*.local
+
+# -------------------------
+# .NET / MAUI
+# -------------------------
+**/bin/
+**/obj/
+*.user
+*.rsuser
+*.suo
+*.userosscache
+*.userprefs
+*.cache
+*.dbmdl
+*.jfm
+*.pdb
+*.mdb
+*.opendb
+*.log
+*.tlog
+*.vspscc
+*.vssscc
+*.vsp
+*.vsix
+*.psess
+*.pidb
+*.svclog
+*.scc
+*.nupkg
+*.snupkg
+*.dll
+*.exe
+*.app
+*.dmg
+*.msix
+*.zip
+
+# Visual Studio (nested solutions)
+**/.vs/
+
+# Rider / JetBrains (nested projects)
+**/.idea/
+
+# -------------------------
+# DevContainers
+# -------------------------
+.devcontainer/.env
+.devcontainer/.cache/
+
+# -------------------------
+# Plugin build artifacts
+# -------------------------
+plugins/first-party/*/ui/
+plugins/first-party/*/backend/
+
+# -------------------------
+# Environment & Config
+# -------------------------
+.env
+.env.*
+*.secret.json
+
+# -------------------------
+# Coverage / Testing
+# -------------------------
+coverage/
+*.lcov
+test-results/
+
+# -------------------------
+# CI/CD
+# -------------------------
+.github/*-cache/
