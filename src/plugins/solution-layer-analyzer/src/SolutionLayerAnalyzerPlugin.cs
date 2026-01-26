@@ -5,6 +5,7 @@ using DataverseDevKit.Core.Abstractions;
 using DataverseDevKit.Core.Models;
 using Ddk.SolutionLayerAnalyzer.Data;
 using Ddk.SolutionLayerAnalyzer.DTOs;
+using Ddk.SolutionLayerAnalyzer.Services;
 
 namespace Ddk.SolutionLayerAnalyzer;
 
@@ -116,21 +117,18 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             request.SourceSolutions.Count,
             request.TargetSolutions.Count);
 
-        // TODO: Implement actual indexing logic
-        // For now, return a placeholder response
-        var response = new IndexResponse
-        {
-            Stats = new IndexStats
-            {
-                Solutions = request.SourceSolutions.Count + request.TargetSolutions.Count,
-                Components = 0,
-                Layers = 0
-            },
-            Warnings = new List<string>
-            {
-                "Indexing not yet fully implemented - this is a placeholder response"
-            }
-        };
+        // Get Dataverse client
+        var dataverseClient = _context.GetDataverseClient(request.ConnectionId);
+
+        // Create indexing service
+        var indexingService = new IndexingService(
+            _dbContext!,
+            _context.Logger,
+            dataverseClient,
+            _context);
+
+        // Execute indexing
+        var response = await indexingService.IndexAsync(request, cancellationToken);
 
         return JsonSerializer.SerializeToElement(response);
     }
