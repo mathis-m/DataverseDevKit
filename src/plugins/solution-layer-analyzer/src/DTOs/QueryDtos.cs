@@ -1,3 +1,5 @@
+using Ddk.SolutionLayerAnalyzer.Filters;
+
 namespace Ddk.SolutionLayerAnalyzer.DTOs;
 
 /// <summary>
@@ -8,7 +10,7 @@ public sealed record QueryRequest
     /// <summary>
     /// Gets the filters (AST).
     /// </summary>
-    public object? Filters { get; init; }
+    public FilterNode? Filters { get; init; }
 
     /// <summary>
     /// Gets the group by fields.

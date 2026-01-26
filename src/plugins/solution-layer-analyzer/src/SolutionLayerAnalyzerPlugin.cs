@@ -138,38 +138,11 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         var request = JsonSerializer.Deserialize<QueryRequest>(payload)
             ?? throw new ArgumentException("Invalid query request payload", nameof(payload));
 
-        _context!.Logger.LogInformation("Executing query with {FilterCount} filters", request.Filters != null ? 1 : 0);
+        _context!.Logger.LogInformation("Executing query with filters: {HasFilters}", request.Filters != null);
 
-        // Query the database
-        var query = _dbContext!.Components
-            .Include(c => c.Layers)
-            .AsQueryable();
-
-        // Apply paging
-        var total = await query.CountAsync(cancellationToken);
-        var components = await query
-            .Skip(request.Paging.Skip)
-            .Take(request.Paging.Take)
-            .ToListAsync(cancellationToken);
-
-        // Map to response
-        var rows = components.Select(c => new ComponentResult
-        {
-            ComponentId = c.ComponentId,
-            ComponentType = c.ComponentType,
-            LogicalName = c.LogicalName,
-            DisplayName = c.DisplayName,
-            LayerSequence = c.Layers.OrderBy(l => l.Ordinal).Select(l => l.SolutionName).ToList(),
-            IsManaged = c.Layers.Any(l => l.IsManaged),
-            Publisher = c.Layers.FirstOrDefault()?.Publisher,
-            TableLogicalName = c.TableLogicalName
-        }).ToList();
-
-        var response = new QueryResponse
-        {
-            Rows = rows,
-            Total = total
-        };
+        // Use QueryService with filter evaluation
+        var queryService = new QueryService(_dbContext!);
+        var response = await queryService.QueryAsync(request, cancellationToken);
 
         return JsonSerializer.SerializeToElement(response);
     }
