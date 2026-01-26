@@ -283,10 +283,10 @@ public class IndexingService
         {
             1 => "Entity",
             2 => "Attribute",
-            24 => "SystemForm",
+            24 => "SystemForm",  // Form (older code)
             26 => "SavedQuery",
             50 => "RibbonCustomization",
-            60 => "SystemForm",
+            60 => "SystemForm",  // Form (primary code used in newer solutions)
             61 => "WebResource",
             80 => "AppModule",
             92 => "SDKMessageProcessingStep",
