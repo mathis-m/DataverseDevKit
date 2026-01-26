@@ -36,6 +36,12 @@ internal class PluginContextImpl : IPluginContext
         _logger.LogDebug("Event emitted: {EventType}", @event.Type);
     }
 
+    public IDataverseClient GetDataverseClient(string? connectionId = null)
+    {
+        // Use the global factory configured at startup
+        return DataverseClientFactory.CreateClient(connectionId, _logger);
+    }
+
     public Task<string?> GetConfigAsync(string key, CancellationToken cancellationToken = default)
     {
         var configPath = Path.Combine(_storagePath, "config.json");

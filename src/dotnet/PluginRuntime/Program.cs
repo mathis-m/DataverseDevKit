@@ -73,6 +73,13 @@ static async Task RunPluginHostAsync(string socketPath, string assemblyPath, str
     builder.Services.AddSingleton(pluginLoader);
     builder.Services.AddSingleton<PluginHostGrpcService>();
 
+    // Configure Dataverse client factory with a mock implementation
+    // In a real scenario, this would create actual Dataverse SDK clients
+    DataverseClientFactory.Configure((connectionId, logger) =>
+    {
+        return new MockDataverseClientForPluginHost(logger, connectionId ?? "default");
+    });
+
     // Configure Kestrel for Unix domain socket
     builder.WebHost.ConfigureKestrel(options =>
     {

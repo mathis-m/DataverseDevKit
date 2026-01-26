@@ -33,4 +33,12 @@ public interface IPluginContext
     /// Sets a configuration value for this plugin.
     /// </summary>
     Task SetConfigAsync(string key, string value, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets a Dataverse client for the specified connection.
+    /// </summary>
+    /// <param name="connectionId">The connection ID. If null, uses the active connection.</param>
+    /// <returns>A Dataverse client instance.</returns>
+    /// <exception cref="InvalidOperationException">Thrown if the connection is not found or not authenticated.</exception>
+    IDataverseClient GetDataverseClient(string? connectionId = null);
 }
