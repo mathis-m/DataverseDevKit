@@ -117,14 +117,14 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             request.SourceSolutions.Count,
             request.TargetSolutions.Count);
 
-        // Get Dataverse client
-        var dataverseClient = _context.GetDataverseClient(request.ConnectionId);
+        // Get ServiceClient from factory
+        var serviceClient = _context.ServiceClientFactory.GetServiceClient(request.ConnectionId);
 
         // Create indexing service
         var indexingService = new IndexingService(
             _dbContext!,
             _context.Logger,
-            dataverseClient,
+            serviceClient,
             _context);
 
         // Execute indexing

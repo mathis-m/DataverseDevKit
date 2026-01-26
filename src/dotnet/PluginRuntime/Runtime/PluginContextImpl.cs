@@ -12,11 +12,13 @@ internal class PluginContextImpl : IPluginContext
     private readonly ILogger _logger;
     private readonly string _storagePath;
     private readonly List<PluginEvent> _events = new();
+    private readonly IServiceClientFactory _serviceClientFactory;
 
-    public PluginContextImpl(ILogger logger, string storagePath)
+    public PluginContextImpl(ILogger logger, string storagePath, IServiceClientFactory serviceClientFactory)
     {
         _logger = logger;
         _storagePath = storagePath;
+        _serviceClientFactory = serviceClientFactory;
         
         // Ensure storage directory exists
         if (!Directory.Exists(_storagePath))
@@ -27,6 +29,7 @@ internal class PluginContextImpl : IPluginContext
 
     public ILogger Logger => _logger;
     public string StoragePath => _storagePath;
+    public IServiceClientFactory ServiceClientFactory => _serviceClientFactory;
 
     public IReadOnlyList<PluginEvent> Events => _events.AsReadOnly();
 
@@ -34,12 +37,6 @@ internal class PluginContextImpl : IPluginContext
     {
         _events.Add(@event);
         _logger.LogDebug("Event emitted: {EventType}", @event.Type);
-    }
-
-    public IDataverseClient GetDataverseClient(string? connectionId = null)
-    {
-        // Use the global factory configured at startup
-        return DataverseClientFactory.CreateClient(connectionId, _logger);
     }
 
     public Task<string?> GetConfigAsync(string key, CancellationToken cancellationToken = default)

@@ -1,5 +1,6 @@
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
+using DataverseDevKit.Core.Abstractions;
 using DataverseDevKit.PluginHost.Contracts;
 using DataverseDevKit.PluginHost.Runtime;
 
@@ -12,11 +13,13 @@ public class PluginHostGrpcService : PluginHostService.PluginHostServiceBase
 {
     private readonly ILogger<PluginHostGrpcService> _logger;
     private readonly PluginLoader _pluginLoader;
+    private readonly IServiceClientFactory _serviceClientFactory;
 
-    public PluginHostGrpcService(ILogger<PluginHostGrpcService> logger, PluginLoader pluginLoader)
+    public PluginHostGrpcService(ILogger<PluginHostGrpcService> logger, PluginLoader pluginLoader, IServiceClientFactory serviceClientFactory)
     {
         _logger = logger;
         _pluginLoader = pluginLoader;
+        _serviceClientFactory = serviceClientFactory;
     }
 
     public override async Task<InitializeResponse> Initialize(InitializeRequest request, ServerCallContext context)
@@ -29,7 +32,7 @@ public class PluginHostGrpcService : PluginHostService.PluginHostServiceBase
             
             // Create a logger for the plugin context
             var pluginLogger = _logger;
-            await _pluginLoader.InitializePluginAsync(request.PluginId, request.StoragePath, config, pluginLogger, context.CancellationToken);
+            await _pluginLoader.InitializePluginAsync(request.PluginId, request.StoragePath, config, pluginLogger, _serviceClientFactory, context.CancellationToken);
 
             var plugin = _pluginLoader.Plugin;
 

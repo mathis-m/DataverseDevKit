@@ -1,6 +1,9 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.PowerPlatform.Dataverse.Client;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Ddk.SolutionLayerAnalyzer.Data;
 using Ddk.SolutionLayerAnalyzer.DTOs;
 using Ddk.SolutionLayerAnalyzer.Models;
@@ -16,18 +19,18 @@ public class IndexingService
 {
     private readonly AnalyzerDbContext _dbContext;
     private readonly ILogger _logger;
-    private readonly IDataverseClient _dataverseClient;
+    private readonly ServiceClient _serviceClient;
     private readonly IPluginContext _pluginContext;
 
     public IndexingService(
         AnalyzerDbContext dbContext,
         ILogger logger,
-        IDataverseClient dataverseClient,
+        ServiceClient serviceClient,
         IPluginContext pluginContext)
     {
         _dbContext = dbContext;
         _logger = logger;
-        _dataverseClient = dataverseClient;
+        _serviceClient = serviceClient;
         _pluginContext = pluginContext;
     }
 
@@ -89,52 +92,52 @@ public class IndexingService
     {
         var solutions = new List<Solution>();
 
-        // Build OData filter for solution names
-        var filterConditions = solutionNames.Select(name => $"uniquename eq '{name}'");
-        var filter = string.Join(" or ", filterConditions);
-        var query = $"$select=solutionid,uniquename,friendlyname,version,ismanaged&$filter={filter}";
-
-        _logger.LogInformation("Querying solutions with filter: {Filter}", query);
-
-        var result = await _dataverseClient.QueryAsync("solution", query, cancellationToken);
-
-        if (!result.Success || result.Data == null)
+        try
         {
-            _logger.LogWarning("Failed to query solutions: {Error}", result.Error);
-            return solutions;
-        }
-
-        // Parse JSON response
-        var jsonDoc = JsonDocument.Parse(result.Data);
-        var solutionArray = jsonDoc.RootElement;
-
-        if (solutionArray.ValueKind != JsonValueKind.Array)
-        {
-            _logger.LogWarning("Unexpected response format from solutions query");
-            return solutions;
-        }
-
-        foreach (var solutionElement in solutionArray.EnumerateArray())
-        {
-            var uniqueName = solutionElement.GetProperty("uniquename").GetString() ?? "";
-            var solution = new Solution
+            // Build query for solutions
+            var query = new QueryExpression("solution")
             {
-                SolutionId = Guid.Parse(solutionElement.GetProperty("solutionid").GetString()!),
-                UniqueName = uniqueName,
-                FriendlyName = solutionElement.GetProperty("friendlyname").GetString() ?? uniqueName,
-                Publisher = "Unknown",
-                IsManaged = solutionElement.GetProperty("ismanaged").GetBoolean(),
-                Version = solutionElement.GetProperty("version").GetString() ?? "1.0.0.0",
-                IsSource = request.SourceSolutions.Contains(uniqueName),
-                IsTarget = request.TargetSolutions.Contains(uniqueName)
+                ColumnSet = new ColumnSet("solutionid", "uniquename", "friendlyname", "version", "ismanaged", "publisherid")
             };
 
-            solutions.Add(solution);
-            _dbContext.Solutions.Add(solution);
-        }
+            // Add filter for solution names
+            var filter = new FilterExpression(LogicalOperator.Or);
+            foreach (var name in solutionNames)
+            {
+                filter.AddCondition("uniquename", ConditionOperator.Equal, name);
+            }
+            query.Criteria = filter;
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
-        _logger.LogInformation("Indexed {Count} solutions", solutions.Count);
+            _logger.LogInformation("Querying solutions with {Count} names", solutionNames.Count);
+
+            var results = await Task.Run(() => _serviceClient.RetrieveMultiple(query), cancellationToken);
+
+            foreach (var entity in results.Entities)
+            {
+                var uniqueName = entity.GetAttributeValue<string>("uniquename") ?? "";
+                var solution = new Solution
+                {
+                    SolutionId = entity.Id,
+                    UniqueName = uniqueName,
+                    FriendlyName = entity.GetAttributeValue<string>("friendlyname") ?? uniqueName,
+                    Publisher = "Unknown", // TODO: Lookup publisher name from publisherid
+                    IsManaged = entity.GetAttributeValue<bool>("ismanaged"),
+                    Version = entity.GetAttributeValue<string>("version") ?? "1.0.0.0",
+                    IsSource = request.SourceSolutions.Contains(uniqueName),
+                    IsTarget = request.TargetSolutions.Contains(uniqueName)
+                };
+
+                solutions.Add(solution);
+                _dbContext.Solutions.Add(solution);
+            }
+
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("Indexed {Count} solutions", solutions.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error discovering solutions");
+        }
 
         return solutions;
     }
@@ -146,57 +149,65 @@ public class IndexingService
     {
         var components = new List<Component>();
 
-        foreach (var solution in targetSolutions)
+        try
         {
-            var query = $"$select=componenttype,objectid&$filter=solutionid eq {solution.SolutionId}";
-            var result = await _dataverseClient.QueryAsync("solutioncomponent", query, cancellationToken);
-
-            if (!result.Success || result.Data == null)
+            foreach (var solution in targetSolutions)
             {
-                _logger.LogWarning("Failed to query components for solution {Solution}", solution.UniqueName);
-                continue;
-            }
-
-            var jsonDoc = JsonDocument.Parse(result.Data);
-            if (jsonDoc.RootElement.ValueKind != JsonValueKind.Array)
-            {
-                continue;
-            }
-
-            foreach (var componentElement in jsonDoc.RootElement.EnumerateArray())
-            {
-                var objectId = Guid.Parse(componentElement.GetProperty("objectid").GetString()!);
-                var componentType = componentElement.GetProperty("componenttype").GetInt32();
-
-                if (components.Any(c => c.ObjectId == objectId))
+                var query = new QueryExpression("solutioncomponent")
                 {
-                    continue;
-                }
-
-                var componentTypeName = MapComponentTypeCodeToName(componentType);
-
-                if (componentTypes.Count > 0 && !componentTypes.Contains(componentTypeName))
-                {
-                    continue;
-                }
-
-                var component = new Component
-                {
-                    ComponentId = Guid.NewGuid(),
-                    ObjectId = objectId,
-                    ComponentType = componentTypeName,
-                    ComponentTypeCode = componentType,
-                    LogicalName = $"component_{objectId:N}",
-                    DisplayName = $"Component {componentTypeName}"
+                    ColumnSet = new ColumnSet("componenttype", "objectid"),
+                    Criteria = new FilterExpression
+                    {
+                        Conditions =
+                        {
+                            new ConditionExpression("solutionid", ConditionOperator.Equal, solution.SolutionId)
+                        }
+                    }
                 };
 
-                components.Add(component);
-                _dbContext.Components.Add(component);
-            }
-        }
+                var results = await Task.Run(() => _serviceClient.RetrieveMultiple(query), cancellationToken);
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
-        _logger.LogInformation("Discovered {Count} components", components.Count);
+                foreach (var entity in results.Entities)
+                {
+                    var objectId = entity.GetAttributeValue<Guid>("objectid");
+                    var componentTypeCode = entity.GetAttributeValue<OptionSetValue>("componenttype")?.Value ?? 0;
+
+                    // Check if we already have this component
+                    if (components.Any(c => c.ObjectId == objectId))
+                    {
+                        continue;
+                    }
+
+                    var componentTypeName = MapComponentTypeCodeToName(componentTypeCode);
+
+                    // Filter by requested component types
+                    if (componentTypes.Count > 0 && !componentTypes.Contains(componentTypeName))
+                    {
+                        continue;
+                    }
+
+                    var component = new Component
+                    {
+                        ComponentId = Guid.NewGuid(),
+                        ObjectId = objectId,
+                        ComponentType = componentTypeName,
+                        ComponentTypeCode = componentTypeCode,
+                        LogicalName = $"component_{objectId:N}",
+                        DisplayName = $"Component {componentTypeName}"
+                    };
+
+                    components.Add(component);
+                    _dbContext.Components.Add(component);
+                }
+            }
+
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("Discovered {Count} components", components.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error discovering components");
+        }
 
         return components;
     }
@@ -207,60 +218,79 @@ public class IndexingService
     {
         var layerCount = 0;
 
-        foreach (var component in components)
+        try
         {
-            var componentTypeName = GetDataverseComponentTypeName(component.ComponentType);
-            var filter = $"msdyn_componentid eq {component.ObjectId} and msdyn_solutioncomponentname eq '{componentTypeName}'";
-            var query = $"$select=msdyn_componentlayerid,msdyn_solutionname,msdyn_order,msdyn_publishername&$filter={filter}&$orderby=msdyn_order asc";
-
-            var result = await _dataverseClient.QueryAsync("msdyn_componentlayer", query, cancellationToken);
-
-            if (!result.Success || result.Data == null)
+            foreach (var component in components)
             {
-                _logger.LogDebug("No layers found for component {ComponentId}", component.ComponentId);
-                continue;
-            }
-
-            var jsonDoc = JsonDocument.Parse(result.Data);
-            if (jsonDoc.RootElement.ValueKind != JsonValueKind.Array)
-            {
-                continue;
-            }
-
-            var ordinal = 0;
-            foreach (var layerElement in jsonDoc.RootElement.EnumerateArray())
-            {
-                var layer = new Layer
+                var componentTypeName = GetDataverseComponentTypeName(component.ComponentType);
+                
+                // Query msdyn_componentlayer for this component
+                var query = new QueryExpression("msdyn_componentlayer")
                 {
-                    LayerId = Guid.NewGuid(),
-                    ComponentId = component.ComponentId,
-                    Ordinal = ordinal++,
-                    SolutionName = layerElement.GetProperty("msdyn_solutionname").GetString() ?? "Unknown",
-                    Publisher = layerElement.TryGetProperty("msdyn_publishername", out var pub) ? 
-                        pub.GetString() ?? "Unknown" : "Unknown",
-                    IsManaged = true,
-                    Version = "1.0.0.0",
-                    CreatedOn = DateTimeOffset.UtcNow
+                    ColumnSet = new ColumnSet("msdyn_componentlayerid", "msdyn_solutionname", "msdyn_order", "msdyn_publishername"),
+                    Criteria = new FilterExpression(LogicalOperator.And)
+                    {
+                        Conditions =
+                        {
+                            new ConditionExpression("msdyn_componentid", ConditionOperator.Equal, component.ObjectId),
+                            new ConditionExpression("msdyn_solutioncomponentname", ConditionOperator.Equal, componentTypeName)
+                        }
+                    },
+                    Orders = { new OrderExpression("msdyn_order", OrderType.Ascending) }
                 };
 
-                var solution = await _dbContext.Solutions
-                    .FirstOrDefaultAsync(s => s.UniqueName == layer.SolutionName, cancellationToken);
-                
-                if (solution != null)
+                EntityCollection results;
+                try
                 {
-                    layer.SolutionId = solution.SolutionId;
-                    layer.IsManaged = solution.IsManaged;
-                    layer.Version = solution.Version;
-                    layer.Publisher = solution.Publisher;
+                    results = await Task.Run(() => _serviceClient.RetrieveMultiple(query), cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "No layers found for component {ComponentId}", component.ComponentId);
+                    continue;
                 }
 
-                _dbContext.Layers.Add(layer);
-                layerCount++;
-            }
-        }
+                foreach (var entity in results.Entities)
+                {
+                    // Get ordinal from msdyn_order field (fix: don't manually increment)
+                    var ordinal = entity.GetAttributeValue<int>("msdyn_order");
+                    
+                    var layer = new Layer
+                    {
+                        LayerId = Guid.NewGuid(),
+                        ComponentId = component.ComponentId,
+                        Ordinal = ordinal,  // Use the value from Dataverse
+                        SolutionName = entity.GetAttributeValue<string>("msdyn_solutionname") ?? "Unknown",
+                        Publisher = entity.Contains("msdyn_publishername") ? 
+                            entity.GetAttributeValue<string>("msdyn_publishername") ?? "Unknown" : "Unknown",
+                        IsManaged = true,
+                        Version = "1.0.0.0",
+                        CreatedOn = DateTimeOffset.UtcNow
+                    };
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
-        _logger.LogInformation("Built {Count} layer records", layerCount);
+                    var solution = await _dbContext.Solutions
+                        .FirstOrDefaultAsync(s => s.UniqueName == layer.SolutionName, cancellationToken);
+                    
+                    if (solution != null)
+                    {
+                        layer.SolutionId = solution.SolutionId;
+                        layer.IsManaged = solution.IsManaged;
+                        layer.Version = solution.Version;
+                        layer.Publisher = solution.Publisher;
+                    }
+
+                    _dbContext.Layers.Add(layer);
+                    layerCount++;
+                }
+            }
+
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("Built {Count} layer records", layerCount);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error building layer stacks");
+        }
 
         return layerCount;
     }

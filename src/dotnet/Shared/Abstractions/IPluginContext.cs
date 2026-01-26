@@ -35,10 +35,7 @@ public interface IPluginContext
     Task SetConfigAsync(string key, string value, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Gets a Dataverse client for the specified connection.
+    /// Gets the service client factory for accessing Dataverse.
     /// </summary>
-    /// <param name="connectionId">The connection ID. If null, uses the active connection.</param>
-    /// <returns>A Dataverse client instance.</returns>
-    /// <exception cref="InvalidOperationException">Thrown if the connection is not found or not authenticated.</exception>
-    IDataverseClient GetDataverseClient(string? connectionId = null);
+    IServiceClientFactory ServiceClientFactory { get; }
 }

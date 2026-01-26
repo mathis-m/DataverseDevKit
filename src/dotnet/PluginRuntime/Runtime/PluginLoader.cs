@@ -59,7 +59,7 @@ public class PluginLoader
         _logger.LogInformation("Plugin instance created: {PluginId}", _plugin.PluginId);
     }
 
-    public async Task InitializePluginAsync(string pluginId, string storagePath, Dictionary<string, string> config, ILogger contextLogger, CancellationToken cancellationToken = default)
+    public async Task InitializePluginAsync(string pluginId, string storagePath, Dictionary<string, string> config, ILogger contextLogger, IServiceClientFactory serviceClientFactory, CancellationToken cancellationToken = default)
     {
         if (_plugin == null)
         {
@@ -68,8 +68,8 @@ public class PluginLoader
 
         _logger.LogInformation("Initializing plugin: {PluginId}", pluginId);
 
-        // Create context with provided logger
-        _context = new PluginContextImpl(contextLogger, storagePath);
+        // Create context with provided logger and service client factory
+        _context = new PluginContextImpl(contextLogger, storagePath, serviceClientFactory);
 
         // Initialize plugin
         await _plugin.InitializeAsync(_context, cancellationToken);
