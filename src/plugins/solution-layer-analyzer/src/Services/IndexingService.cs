@@ -252,14 +252,14 @@ public class IndexingService
 
                 foreach (var entity in results.Entities)
                 {
-                    // Get ordinal from msdyn_order field (fix: don't manually increment)
+                    // Use ordinal value directly from Dataverse (fixes bug where ordinals were manually incremented)
                     var ordinal = entity.GetAttributeValue<int>("msdyn_order");
                     
                     var layer = new Layer
                     {
                         LayerId = Guid.NewGuid(),
                         ComponentId = component.ComponentId,
-                        Ordinal = ordinal,  // Use the value from Dataverse
+                        Ordinal = ordinal,
                         SolutionName = entity.GetAttributeValue<string>("msdyn_solutionname") ?? "Unknown",
                         Publisher = entity.Contains("msdyn_publishername") ? 
                             entity.GetAttributeValue<string>("msdyn_publishername") ?? "Unknown" : "Unknown",
