@@ -193,13 +193,52 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             request.Left.SolutionName,
             request.Right.SolutionName);
 
-        // TODO: Implement actual diff logic with payload retrieval
+        // Get the component
+        var component = await _dbContext!.Components
+            .Include(c => c.Layers)
+            .FirstOrDefaultAsync(c => c.ComponentId == request.ComponentId, cancellationToken);
+
+        if (component == null)
+        {
+            throw new InvalidOperationException($"Component not found: {request.ComponentId}");
+        }
+
+        // Get ServiceClient for payload retrieval
+        var serviceClient = _context.ServiceClientFactory.GetServiceClient(request.ConnectionId);
+        var payloadService = new PayloadService(serviceClient, _context.Logger);
+
+        // Retrieve left payload
+        var (leftText, leftMime) = await payloadService.RetrievePayloadAsync(
+            component.ObjectId,
+            component.ComponentType,
+            request.Left.SolutionName,
+            cancellationToken);
+
+        // Retrieve right payload
+        var (rightText, rightMime) = await payloadService.RetrievePayloadAsync(
+            component.ObjectId,
+            component.ComponentType,
+            request.Right.SolutionName,
+            cancellationToken);
+
+        var warnings = new List<string>();
+        if (leftText == null)
+        {
+            warnings.Add($"Could not retrieve payload for left solution: {request.Left.SolutionName}");
+            leftText = "// Payload not available";
+        }
+        if (rightText == null)
+        {
+            warnings.Add($"Could not retrieve payload for right solution: {request.Right.SolutionName}");
+            rightText = "// Payload not available";
+        }
+
         var response = new DiffResponse
         {
-            LeftText = "// Left payload not yet implemented",
-            RightText = "// Right payload not yet implemented",
-            Mime = "text/plain",
-            Warnings = new List<string> { "Diff functionality not yet fully implemented" }
+            LeftText = leftText ?? string.Empty,
+            RightText = rightText ?? string.Empty,
+            Mime = leftMime ?? rightMime ?? "text/plain",
+            Warnings = warnings
         };
 
         return JsonSerializer.SerializeToElement(response);

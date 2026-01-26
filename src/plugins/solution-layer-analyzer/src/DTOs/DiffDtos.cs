@@ -11,6 +11,11 @@ public sealed record DiffRequest
     public Guid ComponentId { get; init; }
 
     /// <summary>
+    /// Gets the connection ID.
+    /// </summary>
+    public string? ConnectionId { get; init; }
+
+    /// <summary>
     /// Gets the left layer.
     /// </summary>
     public DiffLayer Left { get; init; } = new();
