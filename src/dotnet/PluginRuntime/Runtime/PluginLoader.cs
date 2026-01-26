@@ -6,13 +6,14 @@ using DataverseDevKit.Core.Abstractions;
 namespace DataverseDevKit.PluginHost.Runtime;
 
 /// <summary>
-/// Loads and manages plugin assemblies.
+/// Loads and manages plugin assemblies with automatic dependency resolution.
 /// </summary>
 public class PluginLoader
 {
     private ILogger _logger = NullLogger.Instance;
     private IToolPlugin? _plugin;
     private IPluginContext? _context;
+    private PluginLoadContext? _loadContext;
 
     public IToolPlugin Plugin => _plugin ?? throw new InvalidOperationException("Plugin not loaded");
     public IPluginContext Context => _context ?? throw new InvalidOperationException("Plugin not initialized");
@@ -34,16 +35,23 @@ public class PluginLoader
             throw new FileNotFoundException($"Plugin assembly not found: {assemblyPath}");
         }
 
-        // Load assembly
-        var assembly = Assembly.LoadFrom(assemblyPath);
+        // Create isolated load context for the plugin
+        // This automatically handles dependency resolution using .deps.json
+        _loadContext = new PluginLoadContext(assemblyPath);
+        _logger.LogInformation("Created isolated load context for plugin");
+
+        // Load assembly in the isolated context
+        var assembly = _loadContext.LoadFromAssemblyPath(assemblyPath);
         _logger.LogInformation("Loaded assembly: {AssemblyName}", assembly.FullName);
 
-        // Find plugin type
+        // Find plugin type - use simple IsAssignableFrom since shared abstractions are from default context
         var pluginType = assembly.GetTypes()
             .FirstOrDefault(t => typeof(IToolPlugin).IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract);
 
         if (pluginType == null)
         {
+            _logger.LogWarning("Available types in assembly: {Types}", 
+                string.Join(", ", assembly.GetTypes().Select(t => t.FullName)));
             throw new InvalidOperationException($"No IToolPlugin implementation found in assembly: {assemblyPath}");
         }
 
@@ -82,6 +90,13 @@ public class PluginLoader
         if (_plugin != null)
         {
             await _plugin.DisposeAsync();
+        }
+
+        // Unload the plugin's load context to release all assemblies and their dependencies
+        if (_loadContext != null)
+        {
+            _loadContext.Unload();
+            _logger.LogInformation("Unloaded plugin assembly context");
         }
     }
 }

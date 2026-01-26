@@ -12,7 +12,12 @@
     "assembly": "backend/Ddk.SolutionLayerAnalyzer.dll",
     "entryPoint": "Ddk.SolutionLayerAnalyzer.SolutionLayerAnalyzerPlugin"
   },
-  "ui": null,
+  "ui": {
+    "devEntry": "http://localhost:5174/dist/assets/remoteEntry.js",
+    "entry": "frontend/assets/remoteEntry.js",
+    "module": "./Plugin",
+    "scope": "solutionLayerAnalyzer"
+  },
   "permissions": {
     "dataverse": ["query", "metadata"],
     "storage": ["read", "write"]

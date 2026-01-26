@@ -22,42 +22,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\dotnet\Shared\DataverseDevKit.Shared.csproj" />
+    <ProjectReference Include="..\..\..\dotnet\Shared\DataverseDevKit.Shared.csproj" Private="false" />
   </ItemGroup>
 
-  <!-- Copy build output to dist/backend -->
-  <Target Name="CopyToDistFolder" AfterTargets="Build">
-    <PropertyGroup>
-      <BackendDistPath>$(DistOutputPath)\backend</BackendDistPath>
-    </PropertyGroup>
-    
-    <!-- Create backend dist folder -->
-    <MakeDir Directories="$(BackendDistPath)" />
-    
-    <!-- Copy all build output to backend folder -->
-    <ItemGroup>
-      <PluginOutputFiles Include="$(OutputPath)**\*.*" 
-                         Exclude="$(OutputPath)**\*.pdb;$(OutputPath)**\*.deps.json" />
-    </ItemGroup>
-    
-    <Copy SourceFiles="@(PluginOutputFiles)" 
-          DestinationFolder="$(BackendDistPath)\%(RecursiveDir)"
-          SkipUnchangedFiles="true" />
-    
-    <Message Importance="high" Text="Plugin $(PluginId) built to: $(DistOutputPath)" />
-  </Target>
-  
-  <!-- Copy manifest to dist folder -->
-  <Target Name="CopyManifestToDist" AfterTargets="CopyToDistFolder">
-    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\plugin.manifest.json"
-          DestinationFolder="$(DistOutputPath)"
-          SkipUnchangedFiles="true"
-          Condition="Exists('$(MSBuildProjectDirectory)\..\plugin.manifest.json')" />
-  </Target>
-
-  <!-- Clean dist folder -->
-  <Target Name="CleanDistFolder" AfterTargets="Clean">
-    <RemoveDir Directories="$(DistOutputPath)" Condition="Exists('$(DistOutputPath)')" />
-  </Target>
+  <!-- Build targets are defined in Directory.Build.targets -->
 
 </Project>
