@@ -14,7 +14,6 @@ public class JsonRpcBridge
     private readonly ILogger<JsonRpcBridge> _logger;
     private readonly ConnectionService _connectionService;
     private readonly AuthService _authService;
-    private readonly DataverseService _dataverseService;
     private readonly PluginHostManager _pluginHostManager;
     private readonly StorageService _storageService;
     private readonly Dictionary<string, TaskCompletionSource<string>> _pendingRequests = new();
@@ -24,14 +23,12 @@ public class JsonRpcBridge
         ILogger<JsonRpcBridge> logger,
         ConnectionService connectionService,
         AuthService authService,
-        DataverseService dataverseService,
         PluginHostManager pluginHostManager,
         StorageService storageService)
     {
         _logger = logger;
         _connectionService = connectionService;
         _authService = authService;
-        _dataverseService = dataverseService;
         _pluginHostManager = pluginHostManager;
         _storageService = storageService;
         
@@ -86,7 +83,6 @@ public class JsonRpcBridge
         {
             "connection" => await HandleConnectionMethodAsync(methodName, paramsElement),
             "auth" => await HandleAuthMethodAsync(methodName, paramsElement),
-            "dataverse" => await HandleDataverseMethodAsync(methodName, paramsElement),
             "plugin" => await HandlePluginMethodAsync(methodName, paramsElement),
             "events" => await HandleEventsMethodAsync(methodName, paramsElement),
             "storage" => await HandleStorageMethodAsync(methodName, paramsElement),
@@ -115,16 +111,6 @@ public class JsonRpcBridge
             "logout" => await _authService.LogoutAsync(),
             "getStatus" => await _authService.GetStatusAsync(),
             _ => throw new ArgumentException($"Unknown auth method: {method}")
-        };
-    }
-
-    private async Task<object?> HandleDataverseMethodAsync(string method, JsonElement? paramsElement)
-    {
-        return method switch
-        {
-            "query" => await _dataverseService.QueryAsync(GetParam<string>(paramsElement, "fetchXml")),
-            "execute" => await _dataverseService.ExecuteAsync(GetParam<string>(paramsElement, "requestJson")),
-            _ => throw new ArgumentException($"Unknown dataverse method: {method}")
         };
     }
 

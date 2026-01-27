@@ -25,7 +25,8 @@ export interface ConnectionInfo {
   name: string;
   url: string;
   isActive: boolean;
-  createdAt: string;
+  isAuthenticated: boolean;
+  authenticatedUser?: string;
 }
 
 export interface AddConnectionParams {
@@ -98,16 +99,15 @@ export interface UserSettings {
   [key: string]: unknown;
 }
 
-// Dataverse types
-export interface QueryResult {
+// Authentication types
+export interface AuthResult {
   success: boolean;
-  data?: string;
-  recordCount: number;
+  user?: string;
+  expiresOn?: string;
   error?: string;
 }
 
-export interface ExecuteResult {
-  success: boolean;
-  response?: string;
-  error?: string;
+export interface AuthStatus {
+  isAuthenticated: boolean;
+  user?: string;
 }

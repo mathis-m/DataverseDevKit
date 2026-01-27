@@ -17,9 +17,5 @@
     "entry": "frontend/assets/remoteEntry.js",
     "module": "./Plugin",
     "scope": "solutionLayerAnalyzer"
-  },
-  "permissions": {
-    "dataverse": ["query", "metadata"],
-    "storage": ["read", "write"]
   }
 }

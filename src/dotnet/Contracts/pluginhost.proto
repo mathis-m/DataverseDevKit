@@ -5,6 +5,7 @@ option csharp_namespace = "DataverseDevKit.PluginHost.Contracts";
 package pluginhost;
 
 // Plugin host service for out-of-process plugin workers
+// This service runs in the plugin process, host calls into it
 service PluginHostService {
   // Initialize the plugin
   rpc Initialize (InitializeRequest) returns (InitializeResponse);
@@ -22,10 +23,25 @@ service PluginHostService {
   rpc Shutdown (ShutdownRequest) returns (ShutdownResponse);
 }
 
+// Token provider service for plugins to request tokens from host
+// This service runs in the host process, plugin calls into it
+service TokenProviderHostService {
+  // Request an access token for Dataverse
+  rpc GetAccessToken (GetAccessTokenRequest) returns (GetAccessTokenResponse);
+  
+  // Get the current connection info
+  rpc GetConnectionInfo (GetConnectionInfoRequest) returns (GetConnectionInfoResponse);
+}
+
 message InitializeRequest {
   string plugin_id = 1;
   string storage_path = 2;
   map<string, string> config = 3;
+  
+  // Token callback configuration
+  string token_callback_socket = 4;   // Socket path for plugin to call back to host for tokens
+  string active_connection_id = 5;    // Currently active connection ID
+  string active_connection_url = 6;   // Currently active connection URL (e.g., https://org.crm.dynamics.com)
 }
 
 message InitializeResponse {
@@ -67,10 +83,11 @@ message SubscribeEventsRequest {
 }
 
 message PluginEvent {
-  string type = 1;
-  string payload = 2;
-  int64 timestamp = 3;
-  map<string, string> metadata = 4;
+  string plugin_id = 1;
+  string type = 2;
+  string payload = 3;
+  int64 timestamp = 4;
+  map<string, string> metadata = 5;
 }
 
 message ShutdownRequest {
@@ -78,4 +95,28 @@ message ShutdownRequest {
 
 message ShutdownResponse {
   bool success = 1;
+}
+
+// Token provider messages
+message GetAccessTokenRequest {
+  string connection_id = 1;   // Empty string means active connection
+  string resource = 2;        // Target resource URL (optional, defaults to connection URL)
+}
+
+message GetAccessTokenResponse {
+  bool success = 1;
+  string access_token = 2;    // The OAuth access token
+  int64 expires_at_unix = 3;  // Unix timestamp (seconds) when token expires
+  string error_message = 4;
+}
+
+message GetConnectionInfoRequest {
+}
+
+message GetConnectionInfoResponse {
+  string connection_id = 1;
+  string connection_name = 2;
+  string connection_url = 3;
+  bool is_authenticated = 4;
+  string user_name = 5;
 }

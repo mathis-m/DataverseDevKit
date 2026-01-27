@@ -7,8 +7,8 @@ import type {
   PluginCommand,
   EventCallback,
   PluginEvent,
-  QueryResult,
-  ExecuteResult,
+  AuthResult,
+  AuthStatus,
 } from './types';
 
 export class HostBridge {
@@ -166,12 +166,16 @@ export class HostBridge {
   }
 
   // Authentication
-  async login(connectionId: string): Promise<void> {
-    return this.sendRequest<void>('auth.login', { connectionId });
+  async login(connectionId: string): Promise<AuthResult> {
+    return this.sendRequest<AuthResult>('auth.login', { connectionId });
   }
 
-  async logout(connectionId: string): Promise<void> {
-    return this.sendRequest<void>('auth.logout', { connectionId });
+  async logout(): Promise<boolean> {
+    return this.sendRequest<boolean>('auth.logout');
+  }
+
+  async getAuthStatus(): Promise<AuthStatus> {
+    return this.sendRequest<AuthStatus>('auth.getStatus');
   }
 
   // Plugin management
@@ -208,15 +212,6 @@ export class HostBridge {
         }
       }
     };
-  }
-
-  // Dataverse operations
-  async query(fetchXml: string): Promise<QueryResult> {
-    return this.sendRequest<QueryResult>('dataverse.query', { fetchXml });
-  }
-
-  async execute(requestJson: string): Promise<ExecuteResult> {
-    return this.sendRequest<ExecuteResult>('dataverse.execute', { requestJson });
   }
 
   // Storage

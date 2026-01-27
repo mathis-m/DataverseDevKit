@@ -6,6 +6,11 @@ namespace DataverseDevKit.Core.Models;
 public record PluginEvent
 {
     /// <summary>
+    /// Gets the plugin ID that emitted this event.
+    /// </summary>
+    public required string PluginId { get; init; }
+
+    /// <summary>
     /// Gets the event type/topic.
     /// </summary>
     public required string Type { get; init; }

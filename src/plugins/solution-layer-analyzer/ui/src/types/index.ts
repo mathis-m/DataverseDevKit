@@ -27,6 +27,24 @@ export interface IndexStats {
   warnings?: string[];
 }
 
+export interface IndexResponse {
+  operationId: string;
+  started: boolean;
+  errorMessage?: string;
+}
+
+export interface IndexCompletionEvent {
+  operationId: string;
+  success: boolean;
+  stats?: {
+    solutions: number;
+    components: number;
+    layers: number;
+  };
+  warnings?: string[];
+  errorMessage?: string;
+}
+
 export type GroupByOption = 'solution' | 'componentType' | 'table' | 'publisher' | 'managed';
 
 export interface FilterOptions {

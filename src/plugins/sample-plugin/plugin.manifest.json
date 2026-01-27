@@ -17,8 +17,5 @@
     "devEntry": "http://localhost:5175/dist/assets/remoteEntry.js",
     "module": "./Plugin",
     "scope": "samplePlugin"
-  },
-  "permissions": {
-    "storage": ["read", "write"]
   }
 }

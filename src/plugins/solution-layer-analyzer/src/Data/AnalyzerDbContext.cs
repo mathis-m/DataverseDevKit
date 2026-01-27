@@ -29,6 +29,11 @@ public sealed class AnalyzerDbContext : DbContext
     public DbSet<Artifact> Artifacts => Set<Artifact>();
 
     /// <summary>
+    /// Gets or sets the IndexOperations table.
+    /// </summary>
+    public DbSet<IndexOperation> IndexOperations => Set<IndexOperation>();
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="AnalyzerDbContext"/> class.
     /// </summary>
     public AnalyzerDbContext()
@@ -93,6 +98,14 @@ public sealed class AnalyzerDbContext : DbContext
         {
             entity.HasKey(e => e.ArtifactId);
             entity.HasIndex(e => new { e.ComponentId, e.SolutionId });
+        });
+
+        // Configure IndexOperation entity
+        modelBuilder.Entity<IndexOperation>(entity =>
+        {
+            entity.HasKey(e => e.OperationId);
+            entity.HasIndex(e => e.Status);
+            entity.HasIndex(e => e.StartedAt);
         });
     }
 }

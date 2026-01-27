@@ -71,15 +71,6 @@ static async Task RunPluginHostAsync(string socketPath, string assemblyPath, str
     builder.Services.AddGrpc();
     builder.Services.AddGrpcReflection();
     builder.Services.AddSingleton(pluginLoader);
-    
-    // Register the mock ServiceClientFactory
-    // In a real scenario, this would create actual Dataverse SDK clients
-    builder.Services.AddSingleton<DataverseDevKit.Core.Abstractions.IServiceClientFactory>(sp =>
-    {
-        var logger = sp.GetRequiredService<ILogger<MockServiceClientFactory>>();
-        return new MockServiceClientFactory(logger);
-    });
-    
     builder.Services.AddSingleton<PluginHostGrpcService>();
 
     // Configure Kestrel for Unix domain socket

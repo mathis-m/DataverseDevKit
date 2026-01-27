@@ -3,23 +3,31 @@ using Microsoft.Extensions.Logging;
 using DataverseDevKit.Core.Abstractions;
 using DataverseDevKit.PluginHost.Contracts;
 using DataverseDevKit.PluginHost.Runtime;
+using System.Text.Json;
+using System.Text.Encodings.Web;
 
 namespace DataverseDevKit.PluginHost.Services;
 
 /// <summary>
 /// gRPC service implementation for plugin host communication.
 /// </summary>
-public class PluginHostGrpcService : PluginHostService.PluginHostServiceBase
+public sealed class PluginHostGrpcService : PluginHostService.PluginHostServiceBase, IDisposable
 {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
     private readonly ILogger<PluginHostGrpcService> _logger;
     private readonly PluginLoader _pluginLoader;
-    private readonly IServiceClientFactory _serviceClientFactory;
+    private TokenProxyServiceClientFactory? _serviceClientFactory;
+    private bool _disposed;
 
-    public PluginHostGrpcService(ILogger<PluginHostGrpcService> logger, PluginLoader pluginLoader, IServiceClientFactory serviceClientFactory)
+    public PluginHostGrpcService(ILogger<PluginHostGrpcService> logger, PluginLoader pluginLoader)
     {
         _logger = logger;
         _pluginLoader = pluginLoader;
-        _serviceClientFactory = serviceClientFactory;
     }
 
     public override async Task<InitializeResponse> Initialize(InitializeRequest request, ServerCallContext context)
@@ -27,12 +35,34 @@ public class PluginHostGrpcService : PluginHostService.PluginHostServiceBase
         try
         {
             _logger.LogInformation("Initialize request for plugin: {PluginId}", request.PluginId);
+            _logger.LogInformation("Token callback socket: {Socket}", request.TokenCallbackSocket);
+            _logger.LogInformation("Active connection: {Id} ({Url})", request.ActiveConnectionId, request.ActiveConnectionUrl);
 
             var config = new Dictionary<string, string>(request.Config);
-            
+
+            // Create the TokenProxyServiceClientFactory using the callback info from the host
+            if (!string.IsNullOrEmpty(request.TokenCallbackSocket) && !string.IsNullOrEmpty(request.ActiveConnectionUrl))
+            {
+                _serviceClientFactory = new TokenProxyServiceClientFactory(
+                    _logger,
+                    request.TokenCallbackSocket,
+                    new Uri(request.ActiveConnectionUrl),
+                    request.ActiveConnectionId);
+            }
+            else
+            {
+                _logger.LogWarning("No token callback socket or connection URL provided - ServiceClient will not be available");
+            }
+
             // Create a logger for the plugin context
             var pluginLogger = _logger;
-            await _pluginLoader.InitializePluginAsync(request.PluginId, request.StoragePath, config, pluginLogger, _serviceClientFactory, context.CancellationToken);
+            await _pluginLoader.InitializePluginAsync(
+                request.PluginId,
+                request.StoragePath,
+                config,
+                pluginLogger,
+                _serviceClientFactory!,
+                context.CancellationToken);
 
             var plugin = _pluginLoader.Plugin;
 
@@ -90,7 +120,7 @@ public class PluginHostGrpcService : PluginHostService.PluginHostServiceBase
             var result = await _pluginLoader.Plugin.ExecuteAsync(request.CommandName, request.Payload, context.CancellationToken);
 
             // Serialize JsonElement to bytes - only serialization happens here
-            var resultJson = System.Text.Json.JsonSerializer.Serialize(result);
+            var resultJson = System.Text.Json.JsonSerializer.Serialize(result, JsonOptions);
             var resultBytes = Google.Protobuf.ByteString.CopyFromUtf8(resultJson);
 
             return new ExecuteResponse
@@ -124,12 +154,12 @@ public class PluginHostGrpcService : PluginHostService.PluginHostServiceBase
             while (!context.CancellationToken.IsCancellationRequested)
             {
                 var events = pluginContext.Events;
-                
+
                 // Send new events
                 for (int i = lastEventCount; i < events.Count; i++)
                 {
                     var evt = events[i];
-                    
+
                     // Filter by requested event types if specified
                     if (request.EventTypes.Count > 0 && !request.EventTypes.Contains(evt.Type))
                     {
@@ -138,6 +168,7 @@ public class PluginHostGrpcService : PluginHostService.PluginHostServiceBase
 
                     var grpcEvent = new PluginEvent
                     {
+                        PluginId = evt.PluginId,
                         Type = evt.Type,
                         Payload = evt.Payload,
                         Timestamp = evt.Timestamp.ToUnixTimeMilliseconds()
@@ -179,5 +210,18 @@ public class PluginHostGrpcService : PluginHostService.PluginHostServiceBase
         });
 
         return Task.FromResult(new ShutdownResponse { Success = true });
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        if (_serviceClientFactory != null)
+        {
+            _serviceClientFactory.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+
+        GC.SuppressFinalize(this);
     }
 }

@@ -37,19 +37,55 @@ public sealed record IndexRequest
 }
 
 /// <summary>
-/// Response for the index command.
+/// Response for the index command (async operation started).
 /// </summary>
 public sealed record IndexResponse
 {
     /// <summary>
-    /// Gets the statistics.
+    /// Gets the operation ID to track the indexing operation.
     /// </summary>
-    public IndexStats Stats { get; init; } = new();
+    public Guid OperationId { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether the operation was started successfully.
+    /// </summary>
+    public bool Started { get; init; }
+
+    /// <summary>
+    /// Gets an error message if the operation failed to start.
+    /// </summary>
+    public string? ErrorMessage { get; init; }
+}
+
+/// <summary>
+/// Completion event payload for index operation.
+/// </summary>
+public sealed record IndexCompletionEvent
+{
+    /// <summary>
+    /// Gets the operation ID.
+    /// </summary>
+    public Guid OperationId { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether the operation was successful.
+    /// </summary>
+    public bool Success { get; init; }
+
+    /// <summary>
+    /// Gets the statistics if successful.
+    /// </summary>
+    public IndexStats? Stats { get; init; }
 
     /// <summary>
     /// Gets the warnings.
     /// </summary>
     public List<string> Warnings { get; init; } = new();
+
+    /// <summary>
+    /// Gets the error message if failed.
+    /// </summary>
+    public string? ErrorMessage { get; init; }
 }
 
 /// <summary>

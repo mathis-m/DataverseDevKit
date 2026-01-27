@@ -20,11 +20,6 @@ namespace Ddk.SolutionLayerAnalyzer.Filters;
 [JsonDerivedType(typeof(PublisherFilterNode), "PUBLISHER")]
 public abstract class FilterNode
 {
-    /// <summary>
-    /// Gets the filter type.
-    /// </summary>
-    [JsonPropertyName("type")]
-    public abstract string Type { get; }
 }
 
 /// <summary>
@@ -32,8 +27,6 @@ public abstract class FilterNode
 /// </summary>
 public sealed class HasFilterNode : FilterNode
 {
-    public override string Type => "HAS";
-
     /// <summary>
     /// Gets or sets the solution name.
     /// </summary>
@@ -46,8 +39,6 @@ public sealed class HasFilterNode : FilterNode
 /// </summary>
 public sealed class HasAnyFilterNode : FilterNode
 {
-    public override string Type => "HAS_ANY";
-
     /// <summary>
     /// Gets or sets the solution names.
     /// </summary>
@@ -60,8 +51,6 @@ public sealed class HasAnyFilterNode : FilterNode
 /// </summary>
 public sealed class HasAllFilterNode : FilterNode
 {
-    public override string Type => "HAS_ALL";
-
     /// <summary>
     /// Gets or sets the solution names.
     /// </summary>
@@ -74,8 +63,6 @@ public sealed class HasAllFilterNode : FilterNode
 /// </summary>
 public sealed class HasNoneFilterNode : FilterNode
 {
-    public override string Type => "HAS_NONE";
-
     /// <summary>
     /// Gets or sets the solution names.
     /// </summary>
@@ -88,8 +75,6 @@ public sealed class HasNoneFilterNode : FilterNode
 /// </summary>
 public sealed class OrderStrictFilterNode : FilterNode
 {
-    public override string Type => "ORDER_STRICT";
-
     /// <summary>
     /// Gets or sets the sequence of solution names or choice groups.
     /// Each item can be a string (solution name) or a list of strings (any of these solutions).
@@ -103,8 +88,6 @@ public sealed class OrderStrictFilterNode : FilterNode
 /// </summary>
 public sealed class OrderFlexFilterNode : FilterNode
 {
-    public override string Type => "ORDER_FLEX";
-
     /// <summary>
     /// Gets or sets the sequence of solution names or choice groups.
     /// </summary>
@@ -117,8 +100,6 @@ public sealed class OrderFlexFilterNode : FilterNode
 /// </summary>
 public sealed class AndFilterNode : FilterNode
 {
-    public override string Type => "AND";
-
     /// <summary>
     /// Gets or sets the child filters.
     /// </summary>
@@ -131,8 +112,6 @@ public sealed class AndFilterNode : FilterNode
 /// </summary>
 public sealed class OrFilterNode : FilterNode
 {
-    public override string Type => "OR";
-
     /// <summary>
     /// Gets or sets the child filters.
     /// </summary>
@@ -145,8 +124,6 @@ public sealed class OrFilterNode : FilterNode
 /// </summary>
 public sealed class NotFilterNode : FilterNode
 {
-    public override string Type => "NOT";
-
     /// <summary>
     /// Gets or sets the child filter.
     /// </summary>
@@ -159,8 +136,6 @@ public sealed class NotFilterNode : FilterNode
 /// </summary>
 public sealed class ComponentTypeFilterNode : FilterNode
 {
-    public override string Type => "COMPONENT_TYPE";
-
     /// <summary>
     /// Gets or sets the component type.
     /// </summary>
@@ -173,8 +148,6 @@ public sealed class ComponentTypeFilterNode : FilterNode
 /// </summary>
 public sealed class ManagedFilterNode : FilterNode
 {
-    public override string Type => "MANAGED";
-
     /// <summary>
     /// Gets or sets whether to filter for managed (true) or unmanaged (false) components.
     /// </summary>
@@ -187,8 +160,6 @@ public sealed class ManagedFilterNode : FilterNode
 /// </summary>
 public sealed class PublisherFilterNode : FilterNode
 {
-    public override string Type => "PUBLISHER";
-
     /// <summary>
     /// Gets or sets the publisher name.
     /// </summary>

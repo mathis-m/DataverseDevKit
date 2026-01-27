@@ -8,6 +8,14 @@ using DataverseDevKit.PluginHost.Contracts;
 namespace DataverseDevKit.Host.Services;
 
 /// <summary>
+/// EventArgs wrapper for plugin events.
+/// </summary>
+public class PluginEventArgs : EventArgs
+{
+    public required PluginEvent Event { get; init; }
+}
+
+/// <summary>
 /// Manages out-of-process plugin worker lifecycle and communication.
 /// Each plugin instance runs in isolation with its own worker process.
 /// </summary>
@@ -15,11 +23,14 @@ public sealed class PluginHostManager : IDisposable
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
     private readonly ILogger<PluginHostManager> _logger;
     private readonly StorageService _storageService;
+    private readonly TokenCallbackServer _tokenCallbackServer;
+    private readonly ConnectionService _connectionService;
     private readonly Dictionary<string, PluginWorkerInfo> _workers = new();
     private readonly string _pluginsBasePath;
     private readonly HttpClient _httpClient;
@@ -28,10 +39,19 @@ public sealed class PluginHostManager : IDisposable
     // Base URL for the MAUI
     private const string BaseUrl = "https://0.0.0.1/";
 
-    public PluginHostManager(ILogger<PluginHostManager> logger, StorageService storageService)
+    // Event forwarding callback
+    public event EventHandler<PluginEventArgs>? PluginEventReceived;
+
+    public PluginHostManager(
+        ILogger<PluginHostManager> logger, 
+        StorageService storageService,
+        TokenCallbackServer tokenCallbackServer,
+        ConnectionService connectionService)
     {
         _logger = logger;
         _storageService = storageService;
+        _tokenCallbackServer = tokenCallbackServer;
+        _connectionService = connectionService;
 
         // Plugins are located in wwwroot/plugins after build
         var appPath = AppContext.BaseDirectory;
@@ -249,26 +269,104 @@ public sealed class PluginHostManager : IDisposable
         }
 
         _logger.LogInformation("Stopping plugin instance: {PluginId} (instance: {InstanceId})", pluginId, instanceId);
+        await TerminateWorkerAsync(worker);
+    }
 
+    /// <summary>
+    /// Stops all running plugin instances.
+    /// </summary>
+    public async Task StopAllPluginInstancesAsync()
+    {
+        List<PluginWorkerInfo> workers;
+        lock (_lock)
+        {
+            workers = _workers.Values.ToList();
+            _workers.Clear();
+        }
+
+        _logger.LogInformation("Stopping all plugin instances ({Count} workers)", workers.Count);
+
+        // Stop all workers in parallel
+        var stopTasks = workers.Select(TerminateWorkerAsync);
+        await Task.WhenAll(stopTasks);
+
+        _logger.LogInformation("All plugin instances stopped");
+    }
+
+    /// <summary>
+    /// Terminates a worker process gracefully, then forcefully if needed.
+    /// Waits for file handles to be released.
+    /// </summary>
+    private async Task TerminateWorkerAsync(PluginWorkerInfo worker)
+    {
         try
         {
-            // Request graceful shutdown
-            await worker.Client.ShutdownAsync(new ShutdownRequest());
-            
-            // Wait for process to exit
-            if (!worker.Process.WaitForExit(3000))
+            // Dispose gRPC channel first to release network resources
+            worker.Channel?.Dispose();
+
+            // Request graceful shutdown via gRPC
+            try
             {
-                worker.Process.Kill();
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                await worker.Client.ShutdownAsync(new ShutdownRequest(), cancellationToken: cts.Token);
             }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Graceful shutdown request failed for {PluginId}, will force kill", worker.PluginId);
+            }
+
+            // Wait for process to exit gracefully
+            if (!worker.Process.HasExited)
+            {
+                var exited = await WaitForExitAsync(worker.Process, TimeSpan.FromSeconds(5));
+                if (!exited)
+                {
+                    _logger.LogWarning("Plugin worker {PluginId} did not exit gracefully, forcing kill", worker.PluginId);
+                    worker.Process.Kill(entireProcessTree: true);
+                    await WaitForExitAsync(worker.Process, TimeSpan.FromSeconds(3));
+                }
+            }
+
+            _logger.LogDebug("Plugin worker {PluginId} terminated (exit code: {ExitCode})", 
+                worker.PluginId, worker.Process.HasExited ? worker.Process.ExitCode : -1);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Error during graceful shutdown, forcing kill");
-            try { worker.Process.Kill(); } catch { }
+            _logger.LogWarning(ex, "Error terminating worker for plugin {PluginId}", worker.PluginId);
+
+            // Last resort: kill the process
+            try
+            {
+                if (!worker.Process.HasExited)
+                {
+                    worker.Process.Kill(entireProcessTree: true);
+                }
+            }
+            catch { /* ignore */ }
         }
         finally
         {
             CleanupWorker(worker);
+
+            // Give OS time to release file handles
+            await Task.Delay(100);
+        }
+    }
+
+    /// <summary>
+    /// Waits for a process to exit with a timeout.
+    /// </summary>
+    private static async Task<bool> WaitForExitAsync(Process process, TimeSpan timeout)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(timeout);
+            await process.WaitForExitAsync(cts.Token);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
         }
     }
 
@@ -474,6 +572,9 @@ public sealed class PluginHostManager : IDisposable
         var process = Process.Start(psi) 
             ?? throw new InvalidOperationException("Failed to start plugin worker process");
 
+        // Track this process so it's automatically terminated when the host exits
+        ChildProcessTracker.AddProcess(process);
+
         // Capture stderr in background
         var errorOutput = new System.Text.StringBuilder();
         _ = Task.Run(async () =>
@@ -516,11 +617,20 @@ public sealed class PluginHostManager : IDisposable
 
         var client = new PluginHostService.PluginHostServiceClient(channel);
 
-        // Initialize the plugin
+        // Get the token callback socket path (starts server if needed)
+        var tokenCallbackSocket = await _tokenCallbackServer.StartAsync();
+        
+        // Get active connection info
+        var activeConnection = await _connectionService.GetActiveConnectionAsync();
+
+        // Initialize the plugin with token callback info
         var initRequest = new InitializeRequest
         {
             PluginId = pluginId,
-            StoragePath = storagePath
+            StoragePath = storagePath,
+            TokenCallbackSocket = tokenCallbackSocket,
+            ActiveConnectionId = activeConnection?.Id ?? string.Empty,
+            ActiveConnectionUrl = activeConnection?.Url ?? string.Empty
         };
 
         var initResponse = await client.InitializeAsync(initRequest);
@@ -534,7 +644,7 @@ public sealed class PluginHostManager : IDisposable
         _logger.LogInformation("Plugin instance started: {PluginName} v{Version} (instance: {InstanceId})",
             initResponse.PluginName, initResponse.PluginVersion, instanceId);
 
-        return new PluginWorkerInfo
+        var worker = new PluginWorkerInfo
         {
             PluginId = pluginId,
             InstanceId = instanceId,
@@ -543,6 +653,11 @@ public sealed class PluginHostManager : IDisposable
             Channel = channel,
             SocketPath = socketPath
         };
+
+        // Start event subscription in background
+        _ = Task.Run(() => SubscribeToPluginEventsAsync(worker));
+
+        return worker;
     }
 
     private static async Task<bool> WaitForReadySignalAsync(StreamReader stdout)
@@ -570,10 +685,54 @@ public sealed class PluginHostManager : IDisposable
         };
     }
 
+    /// <summary>
+    /// Subscribes to plugin events and forwards them to the frontend.
+    /// </summary>
+    private async Task SubscribeToPluginEventsAsync(PluginWorkerInfo worker)
+    {
+        var cts = new CancellationTokenSource();
+        worker.EventSubscriptionCts = cts;
+
+        try
+        {
+            var request = new SubscribeEventsRequest();
+            // Subscribe to all event types (empty list means all)
+            
+            using var streamingCall = worker.Client.SubscribeEvents(request, cancellationToken: cts.Token);
+
+            _logger.LogInformation("Subscribed to events for plugin {PluginId} (instance: {InstanceId})",
+                worker.PluginId, worker.InstanceId);
+
+            while (await streamingCall.ResponseStream.MoveNext(cts.Token))
+            {
+                var evt = streamingCall.ResponseStream.Current;
+                
+                _logger.LogDebug("Received event from plugin {PluginId}: {EventType}", 
+                    worker.PluginId, evt.Type);
+
+                // Forward event to subscribers (MainPage)
+                PluginEventReceived?.Invoke(this, new PluginEventArgs { Event = evt });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when stopping the subscription
+            _logger.LogDebug("Event subscription cancelled for plugin {PluginId}", worker.PluginId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in event subscription for plugin {PluginId}", worker.PluginId);
+        }
+    }
+
     private void CleanupWorker(PluginWorkerInfo worker)
     {
         try
         {
+            // Cancel event subscription
+            worker.EventSubscriptionCts?.Cancel();
+            worker.EventSubscriptionCts?.Dispose();
+
             worker.Channel?.Dispose();
             worker.Process?.Dispose();
 
@@ -599,14 +758,22 @@ public sealed class PluginHostManager : IDisposable
             _workers.Clear();
         }
 
+        _logger.LogInformation("Disposing PluginHostManager, terminating {Count} workers", workers.Count);
+
         foreach (var worker in workers)
         {
             try
             {
+                // Dispose gRPC channel first
+                worker.Channel?.Dispose();
+
+                // Kill the process and wait for it to exit
                 if (!worker.Process.HasExited)
                 {
-                    worker.Process.Kill();
+                    worker.Process.Kill(entireProcessTree: true);
+                    worker.Process.WaitForExit(5000);
                 }
+
                 CleanupWorker(worker);
             }
             catch (Exception ex)
@@ -614,6 +781,9 @@ public sealed class PluginHostManager : IDisposable
                 _logger.LogError(ex, "Error disposing worker for plugin {PluginId}", worker.PluginId);
             }
         }
+
+        // Give OS time to release file handles after all processes are terminated
+        Thread.Sleep(200);
 
         GC.SuppressFinalize(this);
     }
@@ -660,6 +830,7 @@ internal record PluginWorkerInfo
     public required PluginHostService.PluginHostServiceClient Client { get; init; }
     public required GrpcChannel Channel { get; init; }
     public required string SocketPath { get; init; }
+    public CancellationTokenSource? EventSubscriptionCts { get; set; }
 }
 
 internal record PluginManifest

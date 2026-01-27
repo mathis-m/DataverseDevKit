@@ -25,16 +25,21 @@ public static class MauiProgram
 #endif
             ;
 
+        // Register App for DI (it has constructor dependencies)
+        builder.Services.AddSingleton<App>();
+
         // Pages
         builder.Services.AddTransient<MainPage>();
         
         // Services
-        builder.Services.AddSingleton<JsonRpcBridge>();
-        builder.Services.AddSingleton<PluginHostManager>();
+        builder.Services.AddSingleton<TokenCacheService>();
         builder.Services.AddSingleton<ConnectionService>();
+        builder.Services.AddSingleton<TokenProviderService>();
+        builder.Services.AddSingleton<TokenCallbackServer>();
         builder.Services.AddSingleton<AuthService>();
-        builder.Services.AddSingleton<DataverseService>();
         builder.Services.AddSingleton<StorageService>();
+        builder.Services.AddSingleton<PluginHostManager>();
+        builder.Services.AddSingleton<JsonRpcBridge>();
 
 #if DEBUG
         builder.Logging.AddDebug();

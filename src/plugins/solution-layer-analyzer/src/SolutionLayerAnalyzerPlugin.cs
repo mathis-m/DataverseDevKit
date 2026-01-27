@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using DataverseDevKit.Core.Abstractions;
@@ -15,7 +16,24 @@ namespace Ddk.SolutionLayerAnalyzer;
 public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 {
     private IPluginContext? _context;
-    private AnalyzerDbContext? _dbContext;
+    private SqliteConnection? _keepAliveConnection;
+    private DbContextOptions<AnalyzerDbContext>? _dbContextOptions;
+    private string? _databaseName;
+    private bool _disposed;
+    
+    /// <summary>
+    /// Semaphore to serialize database operations. SQLite in-memory shared cache 
+    /// does not handle concurrent operations well, so we serialize all DB access.
+    /// </summary>
+    private readonly SemaphoreSlim _dbLock = new(1, 1);
+
+    /// <summary>
+    /// Finalizer to ensure cleanup if DisposeAsync is not called.
+    /// </summary>
+    ~SolutionLayerAnalyzerPlugin()
+    {
+        DisposeCore();
+    }
 
     /// <inheritdoc/>
     public string PluginId => "com.ddk.solutionlayeranalyzer";
@@ -26,24 +44,92 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
     /// <inheritdoc/>
     public string Version => "1.0.0";
 
+    /// <summary>
+    /// Creates a new DbContext instance for thread-safe database access.
+    /// Each operation should create its own DbContext to avoid concurrency issues.
+    /// </summary>
+    private AnalyzerDbContext CreateDbContext()
+    {
+        if (_dbContextOptions == null)
+        {
+            throw new InvalidOperationException("Plugin not initialized");
+        }
+        return new AnalyzerDbContext(_dbContextOptions);
+    }
+
     /// <inheritdoc/>
     public async Task InitializeAsync(IPluginContext context, CancellationToken cancellationToken = default)
     {
         _context = context;
         _context.Logger.LogInformation("Solution Layer Analyzer plugin initialized");
 
-        // Initialize in-memory database
-        var options = new DbContextOptionsBuilder<AnalyzerDbContext>()
-            .UseSqlite("Data Source=:memory:")
+        // Use a unique database name per instance to avoid lock conflicts between runs
+        _databaseName = $"SolutionLayerAnalyzer_{Guid.NewGuid():N}";
+        var connectionString = $"Data Source={_databaseName};Mode=Memory;Cache=Shared";
+
+        // Create a shared connection that stays open to keep the in-memory database alive
+        _keepAliveConnection = new SqliteConnection(connectionString);
+        await _keepAliveConnection.OpenAsync(cancellationToken);
+
+        // Configure DbContext options to use the shared in-memory database
+        _dbContextOptions = new DbContextOptionsBuilder<AnalyzerDbContext>()
+            .UseSqlite(connectionString)
             .Options;
 
-        _dbContext = new AnalyzerDbContext(options);
+        // Create schema using a temporary context
+        using (var initContext = new AnalyzerDbContext(_dbContextOptions))
+        {
+            await initContext.Database.EnsureCreatedAsync(cancellationToken);
+        }
+
+        // Register for process exit to ensure cleanup on forced termination
+        AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
         
-        // Ensure database is created
-        await _dbContext.Database.OpenConnectionAsync(cancellationToken);
-        await _dbContext.Database.EnsureCreatedAsync(cancellationToken);
-        
-        _context.Logger.LogInformation("In-memory database initialized");
+        _context.Logger.LogInformation("In-memory database initialized: {DatabaseName}", _databaseName);
+    }
+
+    private void OnProcessExit(object? sender, EventArgs e)
+    {
+        // Synchronously dispose on process exit since we can't await
+        DisposeCore();
+    }
+
+    private void DisposeCore()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+        _disposed = true;
+
+        try
+        {
+            // Unregister the event handler
+            AppDomain.CurrentDomain.ProcessExit -= OnProcessExit;
+        }
+        catch
+        {
+            // Ignore errors during shutdown
+        }
+
+        try
+        {
+            _keepAliveConnection?.Dispose();
+            _keepAliveConnection = null;
+        }
+        catch
+        {
+            // Ignore errors during shutdown  
+        }
+
+        try
+        {
+            _dbLock.Dispose();
+        }
+        catch
+        {
+            // Ignore errors during shutdown
+        }
     }
 
     /// <inheritdoc/>
@@ -86,10 +172,16 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         return Task.FromResult<IReadOnlyList<PluginCommand>>(commands);
     }
 
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
     /// <inheritdoc/>
     public async Task<JsonElement> ExecuteAsync(string commandName, string payload, CancellationToken cancellationToken = default)
     {
-        if (_context == null || _dbContext == null)
+        if (_context == null || _dbContextOptions == null)
         {
             throw new InvalidOperationException("Plugin not initialized");
         }
@@ -109,8 +201,13 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 
     private async Task<JsonElement> ExecuteIndexAsync(string payload, CancellationToken cancellationToken)
     {
-        var request = JsonSerializer.Deserialize<IndexRequest>(payload)
+        var request = JsonSerializer.Deserialize<IndexRequest>(payload, JsonOptions)
             ?? throw new ArgumentException("Invalid index request payload", nameof(payload));
+
+        if (_dbContextOptions == null)
+        {
+            throw new InvalidOperationException("Plugin not initialized");
+        }
 
         _context!.Logger.LogInformation(
             "Starting indexing: {SourceCount} source solutions, {TargetCount} target solutions",
@@ -120,71 +217,100 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         // Get ServiceClient from factory
         var serviceClient = _context.ServiceClientFactory.GetServiceClient(request.ConnectionId);
 
-        // Create indexing service
-        var indexingService = new IndexingService(
-            _dbContext!,
-            _context.Logger,
-            serviceClient,
-            _context);
+        // Serialize database access to avoid SQLite concurrency issues
+        await _dbLock.WaitAsync(cancellationToken);
+        try
+        {
+            // Create indexing service with DbContextOptions
+            var indexingService = new IndexingService(
+                _dbContextOptions,
+                _context.Logger,
+                serviceClient,
+                _context);
 
-        // Execute indexing
-        var response = await indexingService.IndexAsync(request, cancellationToken);
+            // Start indexing (non-blocking)
+            var response = await indexingService.StartIndexAsync(request, cancellationToken);
 
-        return JsonSerializer.SerializeToElement(response);
+            return JsonSerializer.SerializeToElement(response, JsonOptions);
+        }
+        finally
+        {
+            _dbLock.Release();
+        }
     }
 
     private async Task<JsonElement> ExecuteQueryAsync(string payload, CancellationToken cancellationToken)
     {
-        var request = JsonSerializer.Deserialize<QueryRequest>(payload)
+        var request = JsonSerializer.Deserialize<QueryRequest>(payload, JsonOptions)
             ?? throw new ArgumentException("Invalid query request payload", nameof(payload));
 
         _context!.Logger.LogInformation("Executing query with filters: {HasFilters}", request.Filters != null);
 
-        // Use QueryService with filter evaluation
-        var queryService = new QueryService(_dbContext!);
-        var response = await queryService.QueryAsync(request, cancellationToken);
+        // Serialize database access to avoid SQLite concurrency issues
+        await _dbLock.WaitAsync(cancellationToken);
+        try
+        {
+            // Use QueryService with a new DbContext instance
+            await using var dbContext = CreateDbContext();
+            var queryService = new QueryService(dbContext);
+            var response = await queryService.QueryAsync(request, cancellationToken);
 
-        return JsonSerializer.SerializeToElement(response);
+            return JsonSerializer.SerializeToElement(response, JsonOptions);
+        }
+        finally
+        {
+            _dbLock.Release();
+        }
     }
 
     private async Task<JsonElement> ExecuteDetailsAsync(string payload, CancellationToken cancellationToken)
     {
-        var request = JsonSerializer.Deserialize<DetailsRequest>(payload)
+        var request = JsonSerializer.Deserialize<DetailsRequest>(payload, JsonOptions)
             ?? throw new ArgumentException("Invalid details request payload", nameof(payload));
 
         _context!.Logger.LogInformation("Getting details for component: {ComponentId}", request.ComponentId);
 
-        var component = await _dbContext!.Components
-            .Include(c => c.Layers)
-            .FirstOrDefaultAsync(c => c.ComponentId == request.ComponentId, cancellationToken);
-
-        if (component == null)
+        // Serialize database access to avoid SQLite concurrency issues
+        await _dbLock.WaitAsync(cancellationToken);
+        try
         {
-            throw new InvalidOperationException($"Component not found: {request.ComponentId}");
+            await using var dbContext = CreateDbContext();
+            var component = await dbContext.Components
+                .Include(c => c.Layers)
+                .FirstOrDefaultAsync(c => c.ComponentId == request.ComponentId, cancellationToken);
+
+            if (component == null)
+            {
+                throw new InvalidOperationException($"Component not found: {request.ComponentId}");
+            }
+
+            var response = new DetailsResponse
+            {
+                Layers = component.Layers
+                    .OrderBy(l => l.Ordinal)
+                    .Select(l => new LayerDetail
+                    {
+                        SolutionName = l.SolutionName,
+                        Publisher = l.Publisher,
+                        IsManaged = l.IsManaged,
+                        Version = l.Version,
+                        CreatedOn = l.CreatedOn,
+                        Ordinal = l.Ordinal
+                    })
+                    .ToList()
+            };
+
+            return JsonSerializer.SerializeToElement(response, JsonOptions);
         }
-
-        var response = new DetailsResponse
+        finally
         {
-            Layers = component.Layers
-                .OrderBy(l => l.Ordinal)
-                .Select(l => new LayerDetail
-                {
-                    SolutionName = l.SolutionName,
-                    Publisher = l.Publisher,
-                    IsManaged = l.IsManaged,
-                    Version = l.Version,
-                    CreatedOn = l.CreatedOn,
-                    Ordinal = l.Ordinal
-                })
-                .ToList()
-        };
-
-        return JsonSerializer.SerializeToElement(response);
+            _dbLock.Release();
+        }
     }
 
     private async Task<JsonElement> ExecuteDiffAsync(string payload, CancellationToken cancellationToken)
     {
-        var request = JsonSerializer.Deserialize<DiffRequest>(payload)
+        var request = JsonSerializer.Deserialize<DiffRequest>(payload, JsonOptions)
             ?? throw new ArgumentException("Invalid diff request payload", nameof(payload));
 
         _context!.Logger.LogInformation(
@@ -193,17 +319,28 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             request.Left.SolutionName,
             request.Right.SolutionName);
 
-        // Get the component
-        var component = await _dbContext!.Components
-            .Include(c => c.Layers)
-            .FirstOrDefaultAsync(c => c.ComponentId == request.ComponentId, cancellationToken);
-
-        if (component == null)
+        // Get component data within lock, then release for network calls
+        Models.Component component;
+        await _dbLock.WaitAsync(cancellationToken);
+        try
         {
-            throw new InvalidOperationException($"Component not found: {request.ComponentId}");
+            await using var dbContext = CreateDbContext();
+            var found = await dbContext.Components
+                .Include(c => c.Layers)
+                .FirstOrDefaultAsync(c => c.ComponentId == request.ComponentId, cancellationToken);
+
+            if (found == null)
+            {
+                throw new InvalidOperationException($"Component not found: {request.ComponentId}");
+            }
+            component = found;
+        }
+        finally
+        {
+            _dbLock.Release();
         }
 
-        // Get ServiceClient for payload retrieval
+        // Get ServiceClient for payload retrieval (outside lock for long-running network calls)
         var serviceClient = _context.ServiceClientFactory.GetServiceClient(request.ConnectionId);
         var payloadService = new PayloadService(serviceClient, _context.Logger);
 
@@ -241,33 +378,41 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             Warnings = warnings
         };
 
-        return JsonSerializer.SerializeToElement(response);
+        return JsonSerializer.SerializeToElement(response, JsonOptions);
     }
 
     private async Task<JsonElement> ExecuteClearAsync(CancellationToken cancellationToken)
     {
         _context!.Logger.LogInformation("Clearing index");
 
-        // Clear all tables
-        _dbContext!.Artifacts.RemoveRange(_dbContext.Artifacts);
-        _dbContext.Layers.RemoveRange(_dbContext.Layers);
-        _dbContext.Components.RemoveRange(_dbContext.Components);
-        _dbContext.Solutions.RemoveRange(_dbContext.Solutions);
+        // Serialize database access to avoid SQLite concurrency issues
+        await _dbLock.WaitAsync(cancellationToken);
+        try
+        {
+            // Clear all tables using a new DbContext instance
+            await using var dbContext = CreateDbContext();
+            dbContext.Artifacts.RemoveRange(dbContext.Artifacts);
+            dbContext.Layers.RemoveRange(dbContext.Layers);
+            dbContext.Components.RemoveRange(dbContext.Components);
+            dbContext.Solutions.RemoveRange(dbContext.Solutions);
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
 
-        var response = new { Success = true, Message = "Index cleared successfully" };
-        return JsonSerializer.SerializeToElement(response);
+            var response = new { Success = true, Message = "Index cleared successfully" };
+            return JsonSerializer.SerializeToElement(response, JsonOptions);
+        }
+        finally
+        {
+            _dbLock.Release();
+        }
     }
 
     /// <inheritdoc/>
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _context?.Logger.LogInformation("Solution Layer Analyzer plugin disposed");
-        
-        if (_dbContext != null)
-        {
-            await _dbContext.DisposeAsync();
-        }
+        DisposeCore();
+        GC.SuppressFinalize(this);
+        return Task.CompletedTask;
     }
 }

@@ -1,6 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { hostBridge } from '@ddk/host-sdk';
-import { ComponentResult, IndexStats } from '../types';
+import { ComponentResult, IndexResponse, IndexCompletionEvent } from '../types';
 
 const PLUGIN_ID = 'com.ddk.solutionlayeranalyzer';
 
@@ -8,13 +8,36 @@ export const usePluginApi = () => {
   const [indexing, setIndexing] = useState(false);
   const [querying, setQuerying] = useState(false);
   const [diffing, setDiffing] = useState(false);
+  const [indexCompletion, setIndexCompletion] = useState<IndexCompletionEvent | null>(null);
+
+  // Listen for index completion events
+  useEffect(() => {
+    const unsubscribe = hostBridge.addEventListener('plugin:sla:index-complete', (event) => {
+      console.log('Index completion event received:', event);
+      try {
+        const payload = typeof event.payload === 'string' 
+          ? JSON.parse(event.payload) 
+          : event.payload;
+        setIndexCompletion(payload as IndexCompletionEvent);
+        setIndexing(false);
+      } catch (error) {
+        console.error('Failed to parse index completion event:', error);
+        setIndexing(false);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   const indexSolutions = useCallback(async (
     sourceSolutions: string[],
     targetSolutions: string[],
     componentTypes?: string[]
-  ): Promise<IndexStats> => {
+  ): Promise<IndexResponse> => {
     setIndexing(true);
+    setIndexCompletion(null);
     try {
       const payload = JSON.stringify({
         connectionId: 'default',
@@ -25,12 +48,11 @@ export const usePluginApi = () => {
       });
       
       const result = await hostBridge.invokePluginCommand(PLUGIN_ID, 'index', payload);
-      return result as IndexStats;
+      return result as IndexResponse;
     } catch (error) {
       console.error('Index error:', error);
-      throw error;
-    } finally {
       setIndexing(false);
+      throw error;
     }
   }, []);
 
@@ -107,6 +129,7 @@ export const usePluginApi = () => {
     getComponentDetails,
     diffComponentLayers,
     clearIndex,
+    indexCompletion,
     loading: {
       indexing,
       querying,

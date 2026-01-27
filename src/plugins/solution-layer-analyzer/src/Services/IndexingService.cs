@@ -1,14 +1,15 @@
+using System.Diagnostics;
 using System.Text.Json;
-using Microsoft.Extensions.Logging;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.PowerPlatform.Dataverse.Client;
-using Microsoft.Xrm.Sdk;
-using Microsoft.Xrm.Sdk.Query;
+using DataverseDevKit.Core.Abstractions;
+using DataverseDevKit.Core.Models;
 using Ddk.SolutionLayerAnalyzer.Data;
 using Ddk.SolutionLayerAnalyzer.DTOs;
 using Ddk.SolutionLayerAnalyzer.Models;
-using DataverseDevKit.Core.Abstractions;
-using DataverseDevKit.Core.Models;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.PowerPlatform.Dataverse.Client;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 
 namespace Ddk.SolutionLayerAnalyzer.Services;
 
@@ -17,71 +18,185 @@ namespace Ddk.SolutionLayerAnalyzer.Services;
 /// </summary>
 public class IndexingService
 {
-    private readonly AnalyzerDbContext _dbContext;
+    private readonly DbContextOptions<AnalyzerDbContext> _dbContextOptions;
     private readonly ILogger _logger;
     private readonly ServiceClient _serviceClient;
     private readonly IPluginContext _pluginContext;
 
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
     public IndexingService(
-        AnalyzerDbContext dbContext,
+        DbContextOptions<AnalyzerDbContext> dbContextOptions,
         ILogger logger,
         ServiceClient serviceClient,
         IPluginContext pluginContext)
     {
-        _dbContext = dbContext;
+        _dbContextOptions = dbContextOptions;
         _logger = logger;
         _serviceClient = serviceClient;
         _pluginContext = pluginContext;
     }
 
-    public async Task<IndexResponse> IndexAsync(IndexRequest request, CancellationToken cancellationToken)
+    public async Task<IndexResponse> StartIndexAsync(IndexRequest request, CancellationToken cancellationToken)
     {
-        var warnings = new List<string>();
-        var stats = new IndexStats();
+        var operationId = Guid.NewGuid();
 
         try
         {
-            // Phase 1: Discover and index solutions
-            await EmitProgressAsync("solutions", 0, "Discovering solutions...");
-            
-            var allSolutionNames = request.SourceSolutions.Concat(request.TargetSolutions).Distinct().ToList();
-            var solutions = await DiscoverSolutionsAsync(allSolutionNames, request, cancellationToken);
-            
-            stats = stats with { Solutions = solutions.Count };
-            await EmitProgressAsync("solutions", 50, $"Found {solutions.Count} solutions");
+            // Create operation tracking record
+            var operation = new IndexOperation
+            {
+                OperationId = operationId,
+                Status = IndexOperationStatus.InProgress,
+                StartedAt = DateTimeOffset.UtcNow
+            };
 
-            // Phase 2: Discover components from solutions
-            await EmitProgressAsync("components", 0, "Discovering components...");
-            
-            var components = await DiscoverComponentsAsync(
-                solutions.Where(s => s.IsTarget).ToList(),
-                request.IncludeComponentTypes,
-                cancellationToken);
-            
-            stats = stats with { Components = components.Count };
-            await EmitProgressAsync("components", 50, $"Found {components.Count} components");
+            await using (var dbContext = new AnalyzerDbContext(_dbContextOptions))
+            {
+                dbContext.IndexOperations.Add(operation);
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
 
-            // Phase 3: Build layer stacks for each component
-            await EmitProgressAsync("layers", 0, "Building layer stacks...");
-            
-            var layerCount = await BuildLayerStacksAsync(components, cancellationToken);
-            
-            stats = stats with { Layers = layerCount };
-            await EmitProgressAsync("layers", 100, $"Built {layerCount} layers");
-
-            // Mark indexing as complete
-            await EmitProgressAsync("complete", 100, "Indexing complete");
+            // Start indexing in background (fire and forget)
+            _ = Task.Run(async () => await ExecuteIndexingAsync(operationId, request), CancellationToken.None);
 
             return new IndexResponse
             {
-                Stats = stats,
-                Warnings = warnings
+                OperationId = operationId,
+                Started = true
             };
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during indexing");
-            throw;
+            _logger.LogError(ex, "Error starting indexing operation");
+            return new IndexResponse
+            {
+                OperationId = operationId,
+                Started = false,
+                ErrorMessage = ex.Message
+            };
+        }
+    }
+
+    private async Task ExecuteIndexingAsync(Guid operationId, IndexRequest request)
+    {
+        var warnings = new List<string>();
+        var stats = new IndexStats();
+        var success = false;
+        string? errorMessage = null;
+
+        try
+        {
+            // Phase 1: Discover and index solutions
+            await EmitProgressAsync(operationId, "solutions", 0, "Discovering solutions...");
+            
+            var allSolutionNames = request.SourceSolutions.Concat(request.TargetSolutions).Distinct().ToList();
+            var solutions = await DiscoverSolutionsAsync(allSolutionNames, request, CancellationToken.None);
+            
+            stats = stats with { Solutions = solutions.Count };
+            await EmitProgressAsync(operationId, "solutions", 50, $"Found {solutions.Count} solutions");
+
+            // Phase 2: Discover components from solutions
+            await EmitProgressAsync(operationId, "components", 0, "Discovering components...");
+            
+            var components = await DiscoverComponentsAsync(
+                solutions.Where(s => s.IsTarget).ToList(),
+                request.IncludeComponentTypes,
+                CancellationToken.None);
+            
+            stats = stats with { Components = components.Count };
+            await EmitProgressAsync(operationId, "components", 50, $"Found {components.Count} components");
+
+            // Phase 3: Build layer stacks for each component
+            await EmitProgressAsync(operationId, "layers", 0, "Building layer stacks...");
+            
+            var layerCount = await BuildLayerStacksAsync(components, CancellationToken.None);
+            
+            stats = stats with { Layers = layerCount };
+            await EmitProgressAsync(operationId, "layers", 100, $"Built {layerCount} layers");
+
+            success = true;
+            _logger.LogInformation("Indexing operation {OperationId} completed successfully", operationId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during indexing operation {OperationId}", operationId);
+            errorMessage = ex.Message;
+            success = false;
+        }
+        finally
+        {
+            // Update operation status in database
+            await UpdateOperationStatusAsync(operationId, success, stats, warnings, errorMessage);
+
+            // Emit completion event
+            await EmitCompletionEventAsync(operationId, success, stats, warnings, errorMessage);
+        }
+    }
+
+    private async Task UpdateOperationStatusAsync(
+        Guid operationId, 
+        bool success, 
+        IndexStats stats, 
+        List<string> warnings, 
+        string? errorMessage)
+    {
+        try
+        {
+            await using var dbContext = new AnalyzerDbContext(_dbContextOptions);
+            var operation = await dbContext.IndexOperations.FindAsync(operationId);
+            if (operation != null)
+            {
+                operation.Status = success ? IndexOperationStatus.Completed : IndexOperationStatus.Failed;
+                operation.CompletedAt = DateTimeOffset.UtcNow;
+                operation.StatsJson = success ? JsonSerializer.Serialize(stats, JsonOptions) : null;
+                operation.WarningsJson = warnings.Count > 0 ? JsonSerializer.Serialize(warnings, JsonOptions) : null;
+                operation.ErrorMessage = errorMessage;
+
+                await dbContext.SaveChangesAsync(CancellationToken.None);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update operation status for {OperationId}", operationId);
+        }
+    }
+
+    private async Task EmitCompletionEventAsync(
+        Guid operationId, 
+        bool success, 
+        IndexStats stats, 
+        List<string> warnings, 
+        string? errorMessage)
+    {
+        try
+        {
+            var completionEvent = new IndexCompletionEvent
+            {
+                OperationId = operationId,
+                Success = success,
+                Stats = success ? stats : null,
+                Warnings = warnings,
+                ErrorMessage = errorMessage
+            };
+
+            var pluginEvent = new PluginEvent
+            {
+                PluginId = "com.ddk.solutionlayeranalyzer",
+                Type = "plugin:sla:index-complete",
+                Payload = JsonSerializer.Serialize(completionEvent, JsonOptions),
+                Timestamp = DateTimeOffset.UtcNow
+            };
+
+            _pluginContext.EmitEvent(pluginEvent);
+            _logger.LogInformation("Emitted index completion event for operation {OperationId}", operationId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to emit completion event for {OperationId}", operationId);
         }
     }
 
@@ -112,26 +227,30 @@ public class IndexingService
 
             var results = await Task.Run(() => _serviceClient.RetrieveMultiple(query), cancellationToken);
 
-            foreach (var entity in results.Entities)
+            await using (var dbContext = new AnalyzerDbContext(_dbContextOptions))
             {
-                var uniqueName = entity.GetAttributeValue<string>("uniquename") ?? "";
-                var solution = new Solution
+                foreach (var entity in results.Entities)
                 {
-                    SolutionId = entity.Id,
-                    UniqueName = uniqueName,
-                    FriendlyName = entity.GetAttributeValue<string>("friendlyname") ?? uniqueName,
-                    Publisher = "Unknown", // TODO: Lookup publisher name from publisherid
-                    IsManaged = entity.GetAttributeValue<bool>("ismanaged"),
-                    Version = entity.GetAttributeValue<string>("version") ?? "1.0.0.0",
-                    IsSource = request.SourceSolutions.Contains(uniqueName),
-                    IsTarget = request.TargetSolutions.Contains(uniqueName)
-                };
+                    var uniqueName = entity.GetAttributeValue<string>("uniquename") ?? "";
+                    var solution = new Solution
+                    {
+                        SolutionId = entity.Id,
+                        UniqueName = uniqueName,
+                        FriendlyName = entity.GetAttributeValue<string>("friendlyname") ?? uniqueName,
+                        Publisher = "Unknown", // TODO: Lookup publisher name from publisherid
+                        IsManaged = entity.GetAttributeValue<bool>("ismanaged"),
+                        Version = entity.GetAttributeValue<string>("version") ?? "1.0.0.0",
+                        IsSource = request.SourceSolutions.Contains(uniqueName),
+                        IsTarget = request.TargetSolutions.Contains(uniqueName)
+                    };
 
-                solutions.Add(solution);
-                _dbContext.Solutions.Add(solution);
+                    solutions.Add(solution);
+                    dbContext.Solutions.Add(solution);
+                }
+
+                await dbContext.SaveChangesAsync(cancellationToken);
             }
-
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            
             _logger.LogInformation("Indexed {Count} solutions", solutions.Count);
         }
         catch (Exception ex)
@@ -162,46 +281,77 @@ public class IndexingService
                         {
                             new ConditionExpression("solutionid", ConditionOperator.Equal, solution.SolutionId)
                         }
+                    },
+                    PageInfo = new PagingInfo
+                    {
+                        Count = 5000,
+                        PageNumber = 1,
+                        PagingCookie = null
                     }
                 };
 
-                var results = await Task.Run(() => _serviceClient.RetrieveMultiple(query), cancellationToken);
+                var totalProcessed = 0;
+                EntityCollection results;
 
-                foreach (var entity in results.Entities)
+                do
                 {
-                    var objectId = entity.GetAttributeValue<Guid>("objectid");
-                    var componentTypeCode = entity.GetAttributeValue<OptionSetValue>("componenttype")?.Value ?? 0;
+                    results = await Task.Run(() => _serviceClient.RetrieveMultiple(query), cancellationToken);
+                    totalProcessed += results.Entities.Count;
 
-                    // Check if we already have this component
-                    if (components.Any(c => c.ObjectId == objectId))
+                    foreach (var entity in results.Entities)
                     {
-                        continue;
+                        var objectId = entity.GetAttributeValue<Guid>("objectid");
+                        var componentTypeCode = entity.GetAttributeValue<OptionSetValue>("componenttype")?.Value ?? 0;
+
+                        // Check if we already have this component
+                        if (components.Any(c => c.ObjectId == objectId))
+                        {
+                            continue;
+                        }
+
+                        var componentTypeName = MapComponentTypeCodeToName(componentTypeCode);
+
+                        // Filter by requested component types
+                        if (componentTypes.Count > 0 && !componentTypes.Contains(componentTypeName))
+                        {
+                            continue;
+                        }
+
+                        var component = new Component
+                        {
+                            ComponentId = Guid.NewGuid(),
+                            ObjectId = objectId,
+                            ComponentType = componentTypeName,
+                            ComponentTypeCode = componentTypeCode,
+                            LogicalName = $"component_{objectId:N}",
+                            DisplayName = $"Component {componentTypeName}"
+                        };
+
+                        components.Add(component);
+                        // Components will be saved in batch after all solutions are processed
                     }
 
-                    var componentTypeName = MapComponentTypeCodeToName(componentTypeCode);
-
-                    // Filter by requested component types
-                    if (componentTypes.Count > 0 && !componentTypes.Contains(componentTypeName))
+                    // Check if there are more pages
+                    if (results.MoreRecords)
                     {
-                        continue;
+                        query.PageInfo.PageNumber++;
+                        query.PageInfo.PagingCookie = results.PagingCookie;
+                        _logger.LogDebug("Retrieving page {Page} for solution {Solution}, processed {Total} records", 
+                            query.PageInfo.PageNumber, solution.UniqueName, totalProcessed);
                     }
-
-                    var component = new Component
-                    {
-                        ComponentId = Guid.NewGuid(),
-                        ObjectId = objectId,
-                        ComponentType = componentTypeName,
-                        ComponentTypeCode = componentTypeCode,
-                        LogicalName = $"component_{objectId:N}",
-                        DisplayName = $"Component {componentTypeName}"
-                    };
-
-                    components.Add(component);
-                    _dbContext.Components.Add(component);
                 }
+                while (results.MoreRecords);
+
+                _logger.LogInformation("Processed {Total} solution components for {Solution}", totalProcessed, solution.UniqueName);
             }
 
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            // Save all components in a single batch
+            await using (var dbContext = new AnalyzerDbContext(_dbContextOptions))
+            {
+                dbContext.Components.AddRange(components);
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            
             _logger.LogInformation("Discovered {Count} components", components.Count);
         }
         catch (Exception ex)
@@ -217,6 +367,14 @@ public class IndexingService
         CancellationToken cancellationToken)
     {
         var layerCount = 0;
+        var allLayers = new List<Layer>();
+        Dictionary<string, Solution> solutionCache;
+
+        // Load all solutions into cache to avoid repeated database queries
+        await using (var dbContext = new AnalyzerDbContext(_dbContextOptions))
+        {
+            solutionCache = await dbContext.Solutions.ToDictionaryAsync(s => s.UniqueName, cancellationToken);
+        }
 
         try
         {
@@ -236,55 +394,87 @@ public class IndexingService
                             new ConditionExpression("msdyn_solutioncomponentname", ConditionOperator.Equal, componentTypeName)
                         }
                     },
-                    Orders = { new OrderExpression("msdyn_order", OrderType.Ascending) }
+                    Orders = { new OrderExpression("msdyn_order", OrderType.Ascending) },
+                    PageInfo = new PagingInfo
+                    {
+                        Count = 5000,
+                        PageNumber = 1,
+                        PagingCookie = null
+                    }
                 };
 
                 EntityCollection results;
+                var componentLayerCount = 0;
+
                 try
                 {
-                    results = await Task.Run(() => _serviceClient.RetrieveMultiple(query), cancellationToken);
+                    do
+                    {
+                        results = await Task.Run(() => _serviceClient.RetrieveMultiple(query), cancellationToken);
+                        componentLayerCount += results.Entities.Count;
+
+                        foreach (var entity in results.Entities)
+                        {
+                            // Use ordinal value directly from Dataverse (fixes bug where ordinals were manually incremented)
+                            var ordinal = entity.GetAttributeValue<int>("msdyn_order");
+                            var solutionName = entity.GetAttributeValue<string>("msdyn_solutionname") ?? "Unknown";
+                            
+                            var layer = new Layer
+                            {
+                                LayerId = Guid.NewGuid(),
+                                ComponentId = component.ComponentId,
+                                Ordinal = ordinal,
+                                SolutionName = solutionName,
+                                Publisher = entity.Contains("msdyn_publishername") ? 
+                                    entity.GetAttributeValue<string>("msdyn_publishername") ?? "Unknown" : "Unknown",
+                                IsManaged = true,
+                                Version = "1.0.0.0",
+                                CreatedOn = DateTimeOffset.UtcNow
+                            };
+
+                            // Look up solution from cache
+                            if (solutionCache.TryGetValue(solutionName, out var solution))
+                            {
+                                layer.SolutionId = solution.SolutionId;
+                                layer.IsManaged = solution.IsManaged;
+                                layer.Version = solution.Version;
+                                layer.Publisher = solution.Publisher;
+                            }
+
+                            allLayers.Add(layer);
+                            layerCount++;
+                        }
+
+                        // Check if there are more pages
+                        if (results.MoreRecords)
+                        {
+                            query.PageInfo.PageNumber++;
+                            query.PageInfo.PagingCookie = results.PagingCookie;
+                            _logger.LogDebug("Retrieving page {Page} for component {ComponentId}, processed {Total} layers", 
+                                query.PageInfo.PageNumber, component.ComponentId, componentLayerCount);
+                        }
+                    }
+                    while (results.MoreRecords);
+
+                    if (componentLayerCount > 0)
+                    {
+                        _logger.LogDebug("Found {Count} layers for component {ComponentId}", componentLayerCount, component.ComponentId);
+                    }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogDebug(ex, "No layers found for component {ComponentId}", component.ComponentId);
                     continue;
                 }
-
-                foreach (var entity in results.Entities)
-                {
-                    // Use ordinal value directly from Dataverse (fixes bug where ordinals were manually incremented)
-                    var ordinal = entity.GetAttributeValue<int>("msdyn_order");
-                    
-                    var layer = new Layer
-                    {
-                        LayerId = Guid.NewGuid(),
-                        ComponentId = component.ComponentId,
-                        Ordinal = ordinal,
-                        SolutionName = entity.GetAttributeValue<string>("msdyn_solutionname") ?? "Unknown",
-                        Publisher = entity.Contains("msdyn_publishername") ? 
-                            entity.GetAttributeValue<string>("msdyn_publishername") ?? "Unknown" : "Unknown",
-                        IsManaged = true,
-                        Version = "1.0.0.0",
-                        CreatedOn = DateTimeOffset.UtcNow
-                    };
-
-                    var solution = await _dbContext.Solutions
-                        .FirstOrDefaultAsync(s => s.UniqueName == layer.SolutionName, cancellationToken);
-                    
-                    if (solution != null)
-                    {
-                        layer.SolutionId = solution.SolutionId;
-                        layer.IsManaged = solution.IsManaged;
-                        layer.Version = solution.Version;
-                        layer.Publisher = solution.Publisher;
-                    }
-
-                    _dbContext.Layers.Add(layer);
-                    layerCount++;
-                }
             }
 
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            // Save all layers in a single batch
+            await using (var dbContext = new AnalyzerDbContext(_dbContextOptions))
+            {
+                dbContext.Layers.AddRange(allLayers);
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            
             _logger.LogInformation("Built {Count} layer records", layerCount);
         }
         catch (Exception ex)
@@ -295,12 +485,13 @@ public class IndexingService
         return layerCount;
     }
 
-    private async Task EmitProgressAsync(string phase, int percent, string message)
+    private async Task EmitProgressAsync(Guid operationId, string phase, int percent, string message)
     {
         var progressEvent = new PluginEvent
         {
+            PluginId = "com.ddk.solutionlayeranalyzer",
             Type = "plugin:sla:progress",
-            Payload = JsonSerializer.Serialize(new { phase, percent, message }),
+            Payload = JsonSerializer.Serialize(new { operationId, phase, percent, message }, JsonOptions),
             Timestamp = DateTimeOffset.UtcNow
         };
 
