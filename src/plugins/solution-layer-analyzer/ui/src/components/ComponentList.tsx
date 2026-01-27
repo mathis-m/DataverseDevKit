@@ -102,10 +102,17 @@ export const ComponentList: React.FC<ComponentListProps> = ({
                 </Badge>
               </TableCell>
               <TableCell>
-                <Text weight="semibold">{component.logicalName}</Text>
+                <div>
+                  <Text weight="semibold">{component.displayName || component.logicalName}</Text>
+                  {component.displayName && (
+                    <Text size={200} style={{ display: 'block', color: tokens.colorNeutralForeground3 }}>
+                      {component.logicalName}
+                    </Text>
+                  )}
+                </div>
               </TableCell>
               <TableCell>
-                <Text>{component.displayName || '-'}</Text>
+                <Text>{component.displayName ? '-' : ''}</Text>
               </TableCell>
               <TableCell>
                 <Text size={200}>{component.tableLogicalName || '-'}</Text>

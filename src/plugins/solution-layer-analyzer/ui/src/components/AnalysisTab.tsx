@@ -16,15 +16,20 @@ import {
   FilterRegular,
   ChartMultipleRegular,
   TableRegular,
+  ArrowMaximize20Regular,
 } from '@fluentui/react-icons';
 import { ComponentResult, GroupByOption } from '../types';
 import { usePluginApi } from '../hooks/usePluginApi';
 import { ComponentFilterBar } from './ComponentFilterBar';
 import { ComponentList } from './ComponentList';
 import { ComponentDetailPanel } from './ComponentDetailPanel';
+import { VisualizationModal } from './VisualizationModal';
 import { LayerFlowSankey } from '../visualizations/LayerFlowSankey';
 import { LayerHeatmap } from '../visualizations/LayerHeatmap';
 import { LayerStackedBarChart } from '../visualizations/LayerStackedBarChart';
+import { LayerNetworkGraph } from '../visualizations/LayerNetworkGraph';
+import { LayerCirclePacking } from '../visualizations/LayerCirclePacking';
+import { LayerTreemap } from '../visualizations/LayerTreemap';
 
 const useStyles = makeStyles({
   container: {
@@ -62,8 +67,9 @@ export const AnalysisTab: React.FC<AnalysisTabProps> = ({ onNavigateToDiff }) =>
   const [filteredComponents, setFilteredComponents] = useState<ComponentResult[]>([]);
   const [selectedComponent, setSelectedComponent] = useState<ComponentResult | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'visualizations'>('list');
-  const [visualizationType, setVisualizationType] = useState<'sankey' | 'heatmap' | 'stacked'>('sankey');
+  const [visualizationType, setVisualizationType] = useState<'sankey' | 'heatmap' | 'stacked' | 'network' | 'circle' | 'treemap'>('network');
   const [groupBy, setGroupBy] = useState<GroupByOption>('componentType');
+  const [fullscreenViz, setFullscreenViz] = useState<boolean>(false);
 
   const loadComponents = useCallback(async () => {
     const components = await queryComponents();
@@ -187,12 +193,18 @@ export const AnalysisTab: React.FC<AnalysisTabProps> = ({ onNavigateToDiff }) =>
                 <Text>Visualization:</Text>
                 <Dropdown
                   value={
+                    visualizationType === 'network' ? 'Network Graph' :
+                    visualizationType === 'circle' ? 'Circle Packing' :
+                    visualizationType === 'treemap' ? 'Treemap' :
                     visualizationType === 'sankey' ? 'Layer Flow' :
                     visualizationType === 'heatmap' ? 'Heatmap' :
                     'Layer Depth'
                   }
                   onOptionSelect={(_, d) => setVisualizationType(d.optionValue as any)}
                 >
+                  <Option value="network">Network Graph</Option>
+                  <Option value="circle">Circle Packing</Option>
+                  <Option value="treemap">Treemap</Option>
                   <Option value="sankey">Layer Flow</Option>
                   <Option value="heatmap">Heatmap</Option>
                   <Option value="stacked">Layer Depth</Option>
@@ -202,7 +214,7 @@ export const AnalysisTab: React.FC<AnalysisTabProps> = ({ onNavigateToDiff }) =>
                 <Dropdown
                   value={groupBy}
                   onOptionSelect={(_, d) => setGroupBy(d.optionValue as GroupByOption)}
-                  disabled={visualizationType === 'sankey'}
+                  disabled={visualizationType === 'sankey' || visualizationType === 'network'}
                 >
                   <Option value="componentType">Component Type</Option>
                   <Option value="table">Table</Option>
@@ -210,23 +222,72 @@ export const AnalysisTab: React.FC<AnalysisTabProps> = ({ onNavigateToDiff }) =>
                   <Option value="solution">Solution</Option>
                   <Option value="managed">Managed Status</Option>
                 </Dropdown>
+
+                <Button
+                  icon={<ArrowMaximize20Regular />}
+                  onClick={() => setFullscreenViz(true)}
+                  title="Fullscreen"
+                >
+                  Fullscreen
+                </Button>
               </div>
 
               <div className={styles.visualizationContainer}>
+                {visualizationType === 'network' && (
+                  <LayerNetworkGraph components={filteredComponents} width={1000} height={600} />
+                )}
+                {visualizationType === 'circle' && (
+                  <LayerCirclePacking components={filteredComponents} width={1000} height={600} />
+                )}
+                {visualizationType === 'treemap' && (
+                  <LayerTreemap components={filteredComponents} width={1000} height={600} />
+                )}
                 {visualizationType === 'sankey' && (
-                  <LayerFlowSankey components={filteredComponents} />
+                  <LayerFlowSankey components={filteredComponents} width={1000} height={600} />
                 )}
                 {visualizationType === 'heatmap' && (
-                  <LayerHeatmap components={filteredComponents} groupBy={groupBy} />
+                  <LayerHeatmap components={filteredComponents} groupBy={groupBy} width={1000} height={600} />
                 )}
                 {visualizationType === 'stacked' && (
-                  <LayerStackedBarChart components={filteredComponents} groupBy={groupBy} />
+                  <LayerStackedBarChart components={filteredComponents} groupBy={groupBy} width={1000} height={600} />
                 )}
               </div>
             </div>
           )}
         </div>
       </Card>
+
+      <VisualizationModal
+        isOpen={fullscreenViz}
+        onClose={() => setFullscreenViz(false)}
+        title={
+          visualizationType === 'network' ? 'Network Graph' :
+          visualizationType === 'circle' ? 'Circle Packing' :
+          visualizationType === 'treemap' ? 'Treemap' :
+          visualizationType === 'sankey' ? 'Layer Flow' :
+          visualizationType === 'heatmap' ? 'Heatmap' :
+          'Layer Depth'
+        }
+      >
+        {visualizationType === 'network' && (
+          <LayerNetworkGraph components={filteredComponents} width={window.innerWidth * 0.9} height={window.innerHeight * 0.8} />
+        )}
+        {visualizationType === 'circle' && (
+          <LayerCirclePacking components={filteredComponents} width={window.innerWidth * 0.9} height={window.innerHeight * 0.8} />
+        )}
+        {visualizationType === 'treemap' && (
+          <LayerTreemap components={filteredComponents} width={window.innerWidth * 0.9} height={window.innerHeight * 0.8} />
+        )}
+        {visualizationType === 'sankey' && (
+          <LayerFlowSankey components={filteredComponents} width={window.innerWidth * 0.9} height={window.innerHeight * 0.8} />
+        )}
+        {visualizationType === 'heatmap' && (
+          <LayerHeatmap components={filteredComponents} groupBy={groupBy} width={window.innerWidth * 0.9} height={window.innerHeight * 0.8} />
+        )}
+        {visualizationType === 'stacked' && (
+          <LayerStackedBarChart components={filteredComponents} groupBy={groupBy} width={window.innerWidth * 0.9} height={window.innerHeight * 0.8} />
+        )}
+      </VisualizationModal>
     </div>
   );
 };
