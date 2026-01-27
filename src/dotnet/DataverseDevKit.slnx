@@ -11,4 +11,5 @@
   <Folder Name="/Shared/">
     <Project Path="Shared/DataverseDevKit.Shared.csproj" />
   </Folder>
+  <Project Path="PluginRuntime.Tests/PluginRuntime.Tests.csproj" />
 </Solution>

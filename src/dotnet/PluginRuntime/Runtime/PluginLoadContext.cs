@@ -84,6 +84,7 @@ public class PluginLoadContext : AssemblyLoadContext
         
         return assemblyName == "DataverseDevKit.Shared" ||
                assemblyName == "DataverseDevKit.Contracts" ||
+               assemblyName == "Microsoft.PowerPlatform.Dataverse.Client" ||  // Shared SDK assembly
                assemblyName.StartsWith("Microsoft.Extensions.Logging");
     }
 
