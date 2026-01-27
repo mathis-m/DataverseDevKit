@@ -23,32 +23,41 @@ public class PluginLoadContext : AssemblyLoadContext
 
     protected override Assembly? Load(AssemblyName assemblyName)
     {
-        // Try to load shared assemblies from the host's directory (not plugin's)
-        // This ensures plugins use the host's version of shared interfaces/abstractions
-        if (IsSharedAssembly(assemblyName.Name))
+        // Strategy: If an assembly is already loaded in the default context, use it.
+        // This ensures that shared assemblies (host dependencies) are automatically
+        // shared with plugins, preventing type identity mismatches.
+        // Only load plugin-specific assemblies into the isolated plugin context.
+        
+        // First, check if the assembly is already loaded in the default context
+        var loadedAssembly = AssemblyLoadContext.Default.Assemblies
+            .FirstOrDefault(a => a.GetName().Name == assemblyName.Name);
+        
+        if (loadedAssembly != null)
         {
-            // First, check if it's already loaded in the default context
-            var loadedAssembly = AssemblyLoadContext.Default.Assemblies
-                .FirstOrDefault(a => a.GetName().Name == assemblyName.Name);
-            
-            if (loadedAssembly != null)
-            {
-                Debug.WriteLine($"[PluginLoadContext] Using already-loaded {assemblyName.Name} from default context");
-                return loadedAssembly;
-            }
-
-            // Try to load from host directory (where PluginHost.exe is)
-            var hostAssemblyPath = Path.Combine(_hostDirectory, $"{assemblyName.Name}.dll");
-            if (File.Exists(hostAssemblyPath))
-            {
-                Debug.WriteLine($"[PluginLoadContext] Loading {assemblyName.Name} from host directory: {hostAssemblyPath}");
-                // Load into default context so it's shared
-                return AssemblyLoadContext.Default.LoadFromAssemblyPath(hostAssemblyPath);
-            }
-            
-            Debug.WriteLine($"[PluginLoadContext] {assemblyName.Name} not found in host, will try plugin directory");
+            Debug.WriteLine($"[PluginLoadContext] Using already-loaded {assemblyName.Name} from default context (shared assembly)");
+            return loadedAssembly;
         }
 
+        // If not already loaded, try to load from host directory
+        // This covers cases where the host has the assembly but hasn't loaded it yet
+        var hostAssemblyPath = Path.Combine(_hostDirectory, $"{assemblyName.Name}.dll");
+        if (File.Exists(hostAssemblyPath))
+        {
+            Debug.WriteLine($"[PluginLoadContext] Loading {assemblyName.Name} from host directory into default context: {hostAssemblyPath}");
+            // Load into default context so it becomes shared
+            try
+            {
+                return AssemblyLoadContext.Default.LoadFromAssemblyPath(hostAssemblyPath);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[PluginLoadContext] Failed to load {assemblyName.Name} from host directory: {ex.Message}");
+                // Continue to try plugin directory
+            }
+        }
+
+        // Assembly not in host, so it's plugin-specific. Load into plugin's isolated context.
+        
         // Try to resolve using the dependency resolver (uses .deps.json)
         string? assemblyPath = _resolver.ResolveAssemblyToPath(assemblyName);
         if (assemblyPath != null)
@@ -76,16 +85,6 @@ public class PluginLoadContext : AssemblyLoadContext
         // Let the default context handle remaining assemblies (system, runtime, etc.)
         Debug.WriteLine($"[PluginLoadContext] Delegating {assemblyName.Name} to default context");
         return null;
-    }
-
-    private static bool IsSharedAssembly(string? assemblyName)
-    {
-        if (assemblyName == null) return false;
-        
-        return assemblyName == "DataverseDevKit.Shared" ||
-               assemblyName == "DataverseDevKit.Contracts" ||
-               assemblyName == "Microsoft.PowerPlatform.Dataverse.Client" ||  // Shared SDK assembly
-               assemblyName.StartsWith("Microsoft.Extensions.Logging");
     }
 
     protected override IntPtr LoadUnmanagedDll(string unmanagedDllName)
