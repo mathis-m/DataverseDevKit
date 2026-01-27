@@ -385,7 +385,7 @@ public class IndexingService
                 // Query msdyn_componentlayer for this component
                 var query = new QueryExpression("msdyn_componentlayer")
                 {
-                    ColumnSet = new ColumnSet("msdyn_componentlayerid", "msdyn_solutionname", "msdyn_order", "msdyn_publishername"),
+                    ColumnSet = new ColumnSet("msdyn_componentlayerid", "msdyn_solutionname", "msdyn_order", "msdyn_publishername", "msdyn_componentjson"),
                     Criteria = new FilterExpression(LogicalOperator.And)
                     {
                         Conditions =
@@ -418,6 +418,7 @@ public class IndexingService
                             // Use ordinal value directly from Dataverse (fixes bug where ordinals were manually incremented)
                             var ordinal = entity.GetAttributeValue<int>("msdyn_order");
                             var solutionName = entity.GetAttributeValue<string>("msdyn_solutionname") ?? "Unknown";
+                            var componentJson = entity.GetAttributeValue<string>("msdyn_componentjson");
                             
                             var layer = new Layer
                             {
@@ -429,7 +430,8 @@ public class IndexingService
                                     entity.GetAttributeValue<string>("msdyn_publishername") ?? "Unknown" : "Unknown",
                                 IsManaged = true,
                                 Version = "1.0.0.0",
-                                CreatedOn = DateTimeOffset.UtcNow
+                                CreatedOn = DateTimeOffset.UtcNow,
+                                ComponentJson = componentJson
                             };
 
                             // Look up solution from cache

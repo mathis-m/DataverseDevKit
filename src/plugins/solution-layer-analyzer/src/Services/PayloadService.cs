@@ -24,7 +24,31 @@ public class PayloadService
     }
 
     /// <summary>
-    /// Retrieves the payload for a component.
+    /// Retrieves the payload from a layer's componentjson field.
+    /// This works for ALL component types since it uses the msdyn_componentjson field.
+    /// </summary>
+    public (string? Payload, string MimeType) RetrievePayloadFromComponentJson(string? componentJson)
+    {
+        if (string.IsNullOrWhiteSpace(componentJson))
+        {
+            return (null, "application/json");
+        }
+
+        try
+        {
+            // The componentjson is already JSON, just normalize it
+            var normalized = NormalizeJson(componentJson);
+            return (normalized, "application/json");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing component JSON");
+            return (componentJson, "application/json");
+        }
+    }
+
+    /// <summary>
+    /// Retrieves the payload for a component (legacy method for type-specific queries).
     /// </summary>
     public async Task<(string? Payload, string MimeType)> RetrievePayloadAsync(
         Guid objectId,

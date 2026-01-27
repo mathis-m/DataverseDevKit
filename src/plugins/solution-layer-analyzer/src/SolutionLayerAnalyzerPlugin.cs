@@ -344,19 +344,29 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         var serviceClient = _context.ServiceClientFactory.GetServiceClient(request.ConnectionId);
         var payloadService = new PayloadService(serviceClient, _context.Logger);
 
-        // Retrieve left payload
-        var (leftText, leftMime) = await payloadService.RetrievePayloadAsync(
-            component.ObjectId,
-            component.ComponentType,
-            request.Left.SolutionName,
-            cancellationToken);
+        // Find left and right layers
+        var leftLayer = component.Layers.FirstOrDefault(l => l.SolutionName == request.Left.SolutionName);
+        var rightLayer = component.Layers.FirstOrDefault(l => l.SolutionName == request.Right.SolutionName);
 
-        // Retrieve right payload
-        var (rightText, rightMime) = await payloadService.RetrievePayloadAsync(
-            component.ObjectId,
-            component.ComponentType,
-            request.Right.SolutionName,
-            cancellationToken);
+        // Retrieve payloads from componentjson (works for ALL component types)
+        string? leftText = null;
+        string? rightText = null;
+        string? leftMime = "application/json";
+        string? rightMime = "application/json";
+
+        if (leftLayer?.ComponentJson != null)
+        {
+            var (leftPayload, leftPayloadMime) = payloadService.RetrievePayloadFromComponentJson(leftLayer.ComponentJson);
+            leftText = leftPayload;
+            leftMime = leftPayloadMime;
+        }
+
+        if (rightLayer?.ComponentJson != null)
+        {
+            var (rightPayload, rightPayloadMime) = payloadService.RetrievePayloadFromComponentJson(rightLayer.ComponentJson);
+            rightText = rightPayload;
+            rightMime = rightPayloadMime;
+        }
 
         var warnings = new List<string>();
         if (leftText == null)
@@ -374,7 +384,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         {
             LeftText = leftText ?? string.Empty,
             RightText = rightText ?? string.Empty,
-            Mime = leftMime ?? rightMime ?? "text/plain",
+            Mime = leftMime ?? rightMime ?? "application/json",
             Warnings = warnings
         };
 

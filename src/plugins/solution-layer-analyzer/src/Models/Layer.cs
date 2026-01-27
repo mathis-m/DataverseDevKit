@@ -51,6 +51,12 @@ public sealed class Layer
     public DateTimeOffset? CreatedOn { get; set; }
 
     /// <summary>
+    /// Gets or sets the component JSON from msdyn_componentjson field.
+    /// Contains the full entity attributes for this layer.
+    /// </summary>
+    public string? ComponentJson { get; set; }
+
+    /// <summary>
     /// Navigation property to component.
     /// </summary>
     public Component Component { get; set; } = null!;

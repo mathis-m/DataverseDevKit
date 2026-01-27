@@ -13,8 +13,10 @@ import {
 import {
   SearchRegular,
   DismissRegular,
+  FilterRegular,
 } from '@fluentui/react-icons';
 import { ComponentResult } from '../types';
+import { AdvancedFilterBuilder, FilterNode } from './AdvancedFilterBuilder';
 
 const useStyles = makeStyles({
   filterBar: {
@@ -55,6 +57,8 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
   const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
   const [selectedSolutions, setSelectedSolutions] = useState<string[]>([]);
   const [managedFilter, setManagedFilter] = useState<string>('all');
+  const [advancedMode, setAdvancedMode] = useState(false);
+  const [advancedFilter, setAdvancedFilter] = useState<FilterNode | null>(null);
 
   // Extract unique values for filters
   const uniqueTypes = useMemo(() => {
@@ -114,13 +118,15 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
     (searchText ? 1 : 0) +
     (selectedTypes.length > 0 ? 1 : 0) +
     (selectedSolutions.length > 0 ? 1 : 0) +
-    (managedFilter !== 'all' ? 1 : 0);
+    (managedFilter !== 'all' ? 1 : 0) +
+    (advancedFilter ? 1 : 0);
 
   const clearFilters = () => {
     setSearchText('');
     setSelectedTypes([]);
     setSelectedSolutions([]);
     setManagedFilter('all');
+    setAdvancedFilter(null);
   };
 
   return (
@@ -136,51 +142,63 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
           />
         </div>
 
-        <div className={styles.filterField}>
-          <Label>Component Type</Label>
-          <Dropdown
-            multiselect
-            placeholder="All types"
-            value={selectedTypes.length > 0 ? `${selectedTypes.length} selected` : 'All types'}
-            selectedOptions={selectedTypes}
-            onOptionSelect={(_, data) => {
-              setSelectedTypes(data.selectedOptions);
-            }}
-          >
-            {uniqueTypes.map(type => (
-              <Option key={type} value={type}>{type}</Option>
-            ))}
-          </Dropdown>
-        </div>
+        {!advancedMode && (
+          <>
+            <div className={styles.filterField}>
+              <Label>Component Type</Label>
+              <Dropdown
+                multiselect
+                placeholder="All types"
+                value={selectedTypes.length > 0 ? `${selectedTypes.length} selected` : 'All types'}
+                selectedOptions={selectedTypes}
+                onOptionSelect={(_, data) => {
+                  setSelectedTypes(data.selectedOptions);
+                }}
+              >
+                {uniqueTypes.map(type => (
+                  <Option key={type} value={type}>{type}</Option>
+                ))}
+              </Dropdown>
+            </div>
 
-        <div className={styles.filterField}>
-          <Label>Solution</Label>
-          <Dropdown
-            multiselect
-            placeholder="All solutions"
-            value={selectedSolutions.length > 0 ? `${selectedSolutions.length} selected` : 'All solutions'}
-            selectedOptions={selectedSolutions}
-            onOptionSelect={(_, data) => {
-              setSelectedSolutions(data.selectedOptions);
-            }}
-          >
-            {uniqueSolutions.map(solution => (
-              <Option key={solution} value={solution}>{solution}</Option>
-            ))}
-          </Dropdown>
-        </div>
+            <div className={styles.filterField}>
+              <Label>Solution</Label>
+              <Dropdown
+                multiselect
+                placeholder="All solutions"
+                value={selectedSolutions.length > 0 ? `${selectedSolutions.length} selected` : 'All solutions'}
+                selectedOptions={selectedSolutions}
+                onOptionSelect={(_, data) => {
+                  setSelectedSolutions(data.selectedOptions);
+                }}
+              >
+                {uniqueSolutions.map(solution => (
+                  <Option key={solution} value={solution}>{solution}</Option>
+                ))}
+              </Dropdown>
+            </div>
 
-        <div className={styles.filterField}>
-          <Label>Managed</Label>
-          <Dropdown
-            value={managedFilter === 'all' ? 'All' : managedFilter === 'managed' ? 'Managed' : 'Unmanaged'}
-            onOptionSelect={(_, data) => setManagedFilter(data.optionValue || 'all')}
-          >
-            <Option value="all">All</Option>
-            <Option value="managed">Managed</Option>
-            <Option value="unmanaged">Unmanaged</Option>
-          </Dropdown>
-        </div>
+            <div className={styles.filterField}>
+              <Label>Managed</Label>
+              <Dropdown
+                value={managedFilter === 'all' ? 'All' : managedFilter === 'managed' ? 'Managed' : 'Unmanaged'}
+                onOptionSelect={(_, data) => setManagedFilter(data.optionValue || 'all')}
+              >
+                <Option value="all">All</Option>
+                <Option value="managed">Managed</Option>
+                <Option value="unmanaged">Unmanaged</Option>
+              </Dropdown>
+            </div>
+          </>
+        )}
+
+        <Button
+          icon={<FilterRegular />}
+          appearance={advancedMode ? 'primary' : 'secondary'}
+          onClick={() => setAdvancedMode(!advancedMode)}
+        >
+          {advancedMode ? 'Simple Filters' : 'Advanced Filters'}
+        </Button>
 
         {activeFilterCount > 0 && (
           <Button
@@ -192,6 +210,15 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
         )}
       </div>
 
+      {advancedMode && (
+        <div style={{ marginTop: tokens.spacingVerticalM }}>
+          <AdvancedFilterBuilder
+            solutions={uniqueSolutions}
+            onFilterChange={setAdvancedFilter}
+          />
+        </div>
+      )}
+
       <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM, padding: tokens.spacingVerticalS }}>
         <Badge appearance="outline" color="informative">
           {loading ? <Spinner size="tiny" /> : `${filteredComponents.length} / ${components.length} components`}
@@ -202,6 +229,7 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
             {selectedTypes.length > 0 && <Badge appearance="filled" color="success">{selectedTypes.length} types</Badge>}
             {selectedSolutions.length > 0 && <Badge appearance="filled" color="warning">{selectedSolutions.length} solutions</Badge>}
             {managedFilter !== 'all' && <Badge appearance="filled" color="important">{managedFilter}</Badge>}
+            {advancedFilter && <Badge appearance="filled" color="danger">Advanced filter active</Badge>}
           </div>
         )}
       </div>
