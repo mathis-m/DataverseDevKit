@@ -1,0 +1,21 @@
+{
+  "$schema": "../../../tools/schema/plugin.manifest.schema.json",
+  "id": "com.ddk.solutionlayeranalyzer",
+  "name": "Solution Layer Analyzer",
+  "version": "1.0.0",
+  "description": "Perform in-depth analysis of solution components and their layering across selected solutions in Dataverse environments. Support interactive exploration, grouping, and diff views for component payloads.",
+  "author": "DDK Team",
+  "company": "DDK",
+  "category": "development",
+  "icon": "📦",
+  "backend": {
+    "assembly": "backend/Ddk.SolutionLayerAnalyzer.dll",
+    "entryPoint": "Ddk.SolutionLayerAnalyzer.SolutionLayerAnalyzerPlugin"
+  },
+  "ui": {
+    "devEntry": "http://localhost:5174/dist/assets/remoteEntry.js",
+    "entry": "frontend/assets/remoteEntry.js",
+    "module": "./Plugin",
+    "scope": "solutionLayerAnalyzer"
+  }
+}

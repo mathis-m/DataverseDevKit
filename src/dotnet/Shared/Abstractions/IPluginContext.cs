@@ -33,4 +33,9 @@ public interface IPluginContext
     /// Sets a configuration value for this plugin.
     /// </summary>
     Task SetConfigAsync(string key, string value, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets the service client factory for accessing Dataverse.
+    /// </summary>
+    IServiceClientFactory ServiceClientFactory { get; }
 }

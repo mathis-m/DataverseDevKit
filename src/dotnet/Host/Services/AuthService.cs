@@ -3,64 +3,53 @@ using Microsoft.Extensions.Logging;
 namespace DataverseDevKit.Host.Services;
 
 /// <summary>
-/// Manages authentication and token storage.
+/// Manages authentication state and provides auth operations to the frontend.
+/// Delegates actual token management to TokenProviderService.
 /// </summary>
 public class AuthService
 {
     private readonly ILogger<AuthService> _logger;
-    private bool _isAuthenticated;
-    private string? _currentUser;
+    private readonly TokenProviderService _tokenProvider;
 
-    public AuthService(ILogger<AuthService> logger)
+    public AuthService(ILogger<AuthService> logger, TokenProviderService tokenProvider)
     {
         _logger = logger;
+        _tokenProvider = tokenProvider;
     }
 
-    public Task<AuthResult> LoginAsync(string connectionId)
+    /// <summary>
+    /// Initiates interactive OAuth login for a connection.
+    /// Opens the system browser for the user to authenticate.
+    /// </summary>
+    public async Task<AuthResult> LoginAsync(string connectionId)
     {
         _logger.LogInformation("Login requested for connection: {ConnectionId}", connectionId);
-        
-        // TODO: Implement actual OAuth/MSAL authentication
-        // For now, return a stub response
-        _isAuthenticated = true;
-        _currentUser = "developer@contoso.com";
-
-        return Task.FromResult(new AuthResult
-        {
-            Success = true,
-            User = _currentUser
-        });
+        return await _tokenProvider.LoginInteractiveAsync(connectionId);
     }
 
-    public Task<bool> LogoutAsync()
+    /// <summary>
+    /// Signs out from the current connection.
+    /// </summary>
+    public async Task<bool> LogoutAsync()
     {
         _logger.LogInformation("Logout requested");
-        
-        _isAuthenticated = false;
-        _currentUser = null;
-
-        return Task.FromResult(true);
+        return await _tokenProvider.LogoutAsync(null);
     }
 
-    public Task<AuthStatus> GetStatusAsync()
+    /// <summary>
+    /// Gets the current authentication status.
+    /// </summary>
+    public async Task<AuthStatus> GetStatusAsync()
     {
-        return Task.FromResult(new AuthStatus
-        {
-            IsAuthenticated = _isAuthenticated,
-            User = _currentUser
-        });
+        return await _tokenProvider.GetAuthStatusAsync(null);
     }
-}
 
-public record AuthResult
-{
-    public bool Success { get; init; }
-    public string? User { get; init; }
-    public string? Error { get; init; }
-}
-
-public record AuthStatus
-{
-    public bool IsAuthenticated { get; init; }
-    public string? User { get; init; }
+    /// <summary>
+    /// Gets an access token for the active connection.
+    /// Used by plugins via the token proxy mechanism.
+    /// </summary>
+    public async Task<string> GetAccessTokenAsync(string? connectionId = null)
+    {
+        return await _tokenProvider.GetAccessTokenAsync(connectionId);
+    }
 }

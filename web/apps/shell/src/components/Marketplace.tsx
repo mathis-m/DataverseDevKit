@@ -1,36 +1,29 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   makeStyles,
   tokens,
   shorthands,
   Input,
-  Button,
-  Card,
-  CardPreview,
   Text,
-  Badge,
   Dropdown,
   Option,
+  Spinner,
 } from '@fluentui/react-components';
-import {
-  SearchRegular,
-  AppsRegular,
-  PlayRegular,
-  PersonRegular,
-  BuildingRegular,
-} from '@fluentui/react-icons';
-import { hostBridge, type PluginMetadata } from '@ddk/host-sdk';
+import { SearchRegular } from '@fluentui/react-icons';
+import type { PluginMetadata } from '@ddk/host-sdk';
 import { usePluginStore } from '../stores/plugins';
 import { useConnectionStore } from '../stores/connections';
+import { usePlugins } from '../hooks/usePlugins';
+import { PluginCard } from './PluginCard';
 
 const useStyles = makeStyles({
   container: {
     display: 'flex',
     flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalM),
-    ...shorthands.padding(tokens.spacingVerticalXL),
+    ...shorthands.padding(tokens.spacingVerticalL),
     height: '100%',
-    maxWidth: '1600px',
+    maxWidth: '1400px',
     margin: '0 auto',
     width: '100%',
   },
@@ -46,6 +39,7 @@ const useStyles = makeStyles({
   },
   searchInput: {
     ...shorthands.flex(1),
+    maxWidth: '400px',
   },
   filters: {
     display: 'flex',
@@ -54,109 +48,92 @@ const useStyles = makeStyles({
   },
   pluginGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-    gap: tokens.spacingVerticalM,
-    overflowY: 'auto',
-    ...shorthands.flex(1),
+    gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+    gap: tokens.spacingVerticalL,
+    ...shorthands.padding(tokens.spacingVerticalS, 0),
   },
-  pluginCard: {
-    cursor: 'pointer',
-    height: '220px',
-    ...shorthands.transition('all', '0.2s'),
-    '&:hover': {
-      transform: 'translateY(-2px)',
-      boxShadow: tokens.shadow8,
-    },
-  },
-  pluginIcon: {
-    width: '64px',
-    height: '64px',
+  loading: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontSize: '32px',
-    backgroundColor: tokens.colorBrandBackground2,
-    ...shorthands.borderRadius(tokens.borderRadiusMedium),
+    ...shorthands.flex(1),
   },
-  pluginInfo: {
-    display: 'flex',
-    flexDirection: 'column',
-    ...shorthands.gap(tokens.spacingVerticalXS),
-    ...shorthands.padding(tokens.spacingVerticalM),
-  },
-  pluginMeta: {
-    display: 'flex',
-    ...shorthands.gap(tokens.spacingHorizontalXS),
-    alignItems: 'center',
-    flexWrap: 'wrap',
-  },
-  description: {
-    fontSize: tokens.fontSizeBase200,
+  empty: {
+    textAlign: 'center',
+    ...shorthands.padding(tokens.spacingVerticalXXXL),
     color: tokens.colorNeutralForeground3,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    display: '-webkit-box',
-    WebkitLineClamp: '2',
-    WebkitBoxOrient: 'vertical',
   },
 });
 
 export const Marketplace: React.FC = () => {
   const styles = useStyles();
-  const { availablePlugins, setAvailablePlugins, addTab } = usePluginStore();
+  const { addTab } = usePluginStore();
   const activeConnectionId = useConnectionStore((state) => state.activeConnectionId);
+  const { availablePlugins, loading, error } = usePlugins();
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [companyFilter, setCompanyFilter] = useState<string>('all');
 
-  useEffect(() => {
-    loadPlugins();
-  }, []);
-
-  const loadPlugins = async () => {
-    try {
-      const plugins = await hostBridge.listPlugins();
-      setAvailablePlugins(plugins);
-    } catch (error) {
-      console.error('Failed to load plugins:', error);
-    }
+  const handleLaunchPlugin = (plugin: PluginMetadata) => {
+    const instanceId = `${plugin.id}-${Date.now()}`;
+    addTab({
+      instanceId,
+      type: 'plugin',
+      pluginId: plugin.id,
+      title: plugin.name,
+      connectionId: activeConnectionId || null,
+      remoteEntry: plugin.uiEntry,
+      scope: plugin.uiScope || 'unknownPlugin',
+      module: plugin.uiModule || './Plugin',
+    });
   };
 
-  const handleLaunchPlugin = async (plugin: PluginMetadata) => {
-    try {
-      const instanceId = `${plugin.id}-${Date.now()}`;
-      addTab({
-        instanceId,
-        type: 'plugin',
-        pluginId: plugin.id,
-        title: plugin.name,
-        connectionId: activeConnectionId || null,
-        remoteEntry: plugin.uiEntry,
-        scope: plugin.uiScope || 'unknownPlugin',
-        module: plugin.uiModule || './Plugin',
-      });
-    } catch (error) {
-      console.error('Failed to launch plugin:', error);
-    }
-  };
+  const categories = useMemo(
+    () => ['all', ...new Set(availablePlugins.map((p) => p.category))],
+    [availablePlugins]
+  );
 
-  const categories = ['all', ...new Set(availablePlugins.map((p) => p.category))];
-  const companies = ['all', ...new Set(availablePlugins.map((p) => p.company).filter(Boolean) as string[])];
+  const companies = useMemo(
+    () => ['all', ...new Set(availablePlugins.map((p) => p.company).filter(Boolean) as string[])],
+    [availablePlugins]
+  );
 
-  const filteredPlugins = availablePlugins.filter((plugin) => {
-    const matchesSearch =
-      searchTerm === '' ||
-      plugin.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      plugin.description.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = categoryFilter === 'all' || plugin.category === categoryFilter;
-    const matchesCompany = companyFilter === 'all' || plugin.company === companyFilter;
-    return matchesSearch && matchesCategory && matchesCompany;
-  });
+  const filteredPlugins = useMemo(() => {
+    return availablePlugins.filter((plugin) => {
+      const matchesSearch =
+        searchTerm === '' ||
+        plugin.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        plugin.description.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesCategory = categoryFilter === 'all' || plugin.category === categoryFilter;
+      const matchesCompany = companyFilter === 'all' || plugin.company === companyFilter;
+      return matchesSearch && matchesCategory && matchesCompany;
+    });
+  }, [availablePlugins, searchTerm, categoryFilter, companyFilter]);
+
+  if (loading) {
+    return (
+      <div className={styles.container}>
+        <div className={styles.loading}>
+          <Spinner label="Loading plugins..." />
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className={styles.container}>
+        <div className={styles.empty}>
+          <Text size={400}>Error loading plugins: {error}</Text>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <Text size={500} weight="semibold">
+        <Text size={600} weight="semibold">
           Plugin Marketplace
         </Text>
 
@@ -197,48 +174,17 @@ export const Marketplace: React.FC = () => {
         </div>
       </div>
 
-      <div className={styles.pluginGrid}>
-        {filteredPlugins.map((plugin) => (
-          <Card key={plugin.id} className={styles.pluginCard}>
-            <CardPreview>
-              <div className={styles.pluginIcon}>
-                {plugin.icon || <AppsRegular />}
-              </div>
-            </CardPreview>
-
-            <div className={styles.pluginInfo}>
-              <Text weight="semibold" size={400}>
-                {plugin.name}
-              </Text>
-
-              <div className={styles.pluginMeta}>
-                <Badge size="small" appearance="outline" icon={<AppsRegular />}>
-                  {plugin.category}
-                </Badge>
-                {plugin.company && (
-                  <Badge size="small" appearance="outline" icon={<BuildingRegular />}>
-                    {plugin.company}
-                  </Badge>
-                )}
-                <Badge size="small" appearance="outline" icon={<PersonRegular />}>
-                  {plugin.author}
-                </Badge>
-              </div>
-
-              <Text className={styles.description}>{plugin.description}</Text>
-
-              <Button
-                appearance="primary"
-                size="small"
-                icon={<PlayRegular />}
-                onClick={() => handleLaunchPlugin(plugin)}
-              >
-                Launch
-              </Button>
-            </div>
-          </Card>
-        ))}
-      </div>
+      {filteredPlugins.length === 0 ? (
+        <div className={styles.empty}>
+          <Text size={400}>No plugins found matching your filters.</Text>
+        </div>
+      ) : (
+        <div className={styles.pluginGrid}>
+          {filteredPlugins.map((plugin) => (
+            <PluginCard key={plugin.id} plugin={plugin} onLaunch={handleLaunchPlugin} />
+          ))}
+        </div>
+      )}
     </div>
   );
 };

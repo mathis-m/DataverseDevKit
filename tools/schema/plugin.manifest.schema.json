@@ -80,44 +80,6 @@
         }
       }
     },
-    "permissions": {
-      "type": "object",
-      "description": "Capabilities required by this plugin",
-      "properties": {
-        "dataverse": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": ["query", "execute", "metadata", "admin"]
-          },
-          "uniqueItems": true,
-          "description": "Dataverse access levels"
-        },
-        "filesystem": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": ["temp", "documents", "downloads"]
-          },
-          "uniqueItems": true,
-          "description": "Filesystem access scopes"
-        },
-        "network": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "uri"
-          },
-          "description": "Allowed external network endpoints"
-        },
-        "clipboard": {
-          "type": "boolean",
-          "default": false,
-          "description": "Clipboard read/write access"
-        }
-      },
-      "additionalProperties": false
-    },
     "homepage": {
       "type": "string",
       "format": "uri",

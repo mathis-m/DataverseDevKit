@@ -2,4 +2,7 @@
   <Folder Name="/sample-plugin/">
     <Project Path="sample-plugin/src/Ddk.SamplePlugin.csproj" />
   </Folder>
+  <Folder Name="/solution-layer-analyzer/">
+    <Project Path="solution-layer-analyzer/src/Ddk.SolutionLayerAnalyzer.csproj" />
+  </Folder>
 </Solution>

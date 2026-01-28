@@ -1,18 +1,21 @@
 using DataverseDevKit.Host.Bridge;
+using DataverseDevKit.Host.Services;
 using Microsoft.Extensions.Logging;
-using System.Text.Encodings.Web;
+using System.Text.Json;
 
 namespace DataverseDevKit.Host;
 
 public partial class MainPage : ContentPage
 {
     private readonly JsonRpcBridge _bridge;
+    private readonly PluginHostManager _pluginHostManager;
     private readonly ILogger<MainPage> _logger;
 
-    public MainPage(JsonRpcBridge bridge, ILogger<MainPage> logger)
+    public MainPage(JsonRpcBridge bridge, PluginHostManager pluginHostManager, ILogger<MainPage> logger)
     {
         InitializeComponent();
         _bridge = bridge;
+        _pluginHostManager = pluginHostManager;
         _logger = logger;
 
 # if DEBUG
@@ -23,6 +26,9 @@ public partial class MainPage : ContentPage
 
         // Wire up the bridge
         hybridWebView.RawMessageReceived += OnRawMessageReceived;
+        
+        // Subscribe to plugin events
+        _pluginHostManager.PluginEventReceived += OnPluginEventReceived;
         
         _logger.LogInformation("HybridWebView initialized with DefaultFile: {DefaultFile}", hybridWebView.DefaultFile);
     }
@@ -46,10 +52,10 @@ public partial class MainPage : ContentPage
             
             if (!string.IsNullOrEmpty(response))
             {
-                // Send response back to JavaScript via EvaluateJavaScriptAsync
-                // Use JavaScriptEncoder to properly escape the JSON string for JavaScript
-                var escapedResponse = JavaScriptEncoder.Default.Encode(response);
-                var script = $"window.__ddkBridge.handleResponse('{escapedResponse}');";
+                // Encode response as base64 to avoid escaping issues with nested JSON strings
+                var base64Response = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(response));
+                var script = $"window.__ddkBridge.handleResponse('{base64Response}');";
+                _logger.LogDebug("Sending base64 encoded response");
                 await hybridWebView.EvaluateJavaScriptAsync(script);
                 _logger.LogInformation("✅ Response sent successfully");
             }
@@ -57,6 +63,64 @@ public partial class MainPage : ContentPage
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error handling WebView message");
+        }
+    }
+
+    private async void OnPluginEventReceived(object? sender, PluginEventArgs e)
+    {
+        try
+        {
+            var evt = e.Event;
+            _logger.LogInformation("🎉 Plugin event received: {PluginId} - {EventType}", evt.PluginId, evt.Type);
+
+            // Parse payload to avoid double-stringification
+            JsonElement? payloadElement = null;
+            if (!string.IsNullOrEmpty(evt.Payload))
+            {
+                try
+                {
+                    payloadElement = JsonSerializer.Deserialize<JsonElement>(evt.Payload);
+                }
+                catch (JsonException)
+                {
+                    _logger.LogWarning("Failed to parse event payload as JSON, using raw string");
+                }
+            }
+
+            // Convert gRPC PluginEvent to JSON for frontend
+            var eventJson = JsonSerializer.Serialize(new
+            {
+                pluginId = evt.PluginId,
+                type = evt.Type,
+                payload = payloadElement,
+                timestamp = evt.Timestamp,
+                metadata = evt.Metadata
+            }, new JsonSerializerOptions 
+            { 
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase 
+            });
+
+            // Marshal to UI thread before interacting with WebView (COM component)
+            await Dispatcher.DispatchAsync(async () =>
+            {
+                try
+                {
+                    // Encode event as base64 to avoid escaping issues
+                    var base64Event = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(eventJson));
+                    var script = $"window.__ddkBridge.handleResponse('{base64Event}');";
+                    await hybridWebView.EvaluateJavaScriptAsync(script);
+                    
+                    _logger.LogInformation("✅ Event forwarded to frontend: {EventType}", evt.Type);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error evaluating JavaScript in WebView");
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error forwarding plugin event to frontend");
         }
     }
 }

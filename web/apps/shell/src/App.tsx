@@ -60,8 +60,15 @@ const useStyles = makeStyles({
 const App: React.FC = () => {
   const styles = useStyles();
   const { settings } = useSettingsStore();
-  const { openSystemView } = usePluginStore();
+  const { openSystemView, tabs } = usePluginStore();
   const [theme, setTheme] = useState(webDarkTheme);
+
+  // Open marketplace tab on initial load
+  useEffect(() => {
+    if (tabs.length === 0) {
+      openSystemView('marketplace', 'Marketplace', <AppsRegular />);
+    }
+  }, []);  // Run only once on mount
 
   useEffect(() => {
     // Determine theme based on settings

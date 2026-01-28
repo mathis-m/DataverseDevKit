@@ -14,7 +14,8 @@ public sealed class SamplePlugin : IToolPlugin
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
     private IPluginContext? _context;
@@ -84,7 +85,8 @@ public sealed class SamplePlugin : IToolPlugin
             PluginId = PluginId
         };
         
-        return JsonSerializer.SerializeToElement(response, JsonOptions);
+        var json = JsonSerializer.Serialize(response, JsonOptions);
+        return JsonSerializer.Deserialize<JsonElement>(json);
     }
 
     private JsonElement ExecuteEcho(string payload)
@@ -97,16 +99,18 @@ public sealed class SamplePlugin : IToolPlugin
                 Message = request?.Message ?? string.Empty,
                 ReceivedAt = DateTimeOffset.UtcNow
             };
-            return JsonSerializer.SerializeToElement(response, JsonOptions);
+            var json = JsonSerializer.Serialize(response, JsonOptions);
+            return JsonSerializer.Deserialize<JsonElement>(json);
         }
         catch (JsonException)
         {
             // If payload isn't valid JSON, just echo it back as-is
-            return JsonSerializer.SerializeToElement(new EchoResponse
-            {
-                Message = payload,
-                ReceivedAt = DateTimeOffset.UtcNow
-            }, JsonOptions);
+            return JsonSerializer.Deserialize<JsonElement>(
+                JsonSerializer.Serialize(new EchoResponse
+                {
+                    Message = payload,
+                    ReceivedAt = DateTimeOffset.UtcNow
+                }, JsonOptions));
         }
     }
 

@@ -23,68 +23,6 @@
     <ProjectReference Include="..\..\..\dotnet\Shared\DataverseDevKit.Shared.csproj" />
   </ItemGroup>
 
-  <!-- Copy build output to dist/backend -->
-  <Target Name="CopyToDistFolder" AfterTargets="Build">
-    <PropertyGroup>
-      <BackendDistPath>$(DistOutputPath)\backend</BackendDistPath>
-    </PropertyGroup>
-    
-    <!-- Create backend dist folder -->
-    <MakeDir Directories="$(BackendDistPath)" />
-    
-    <!-- Copy all build output to backend folder -->
-    <ItemGroup>
-      <PluginOutputFiles Include="$(OutputPath)**\*.*" 
-                         Exclude="$(OutputPath)**\*.pdb;$(OutputPath)**\*.deps.json" />
-    </ItemGroup>
-    
-    <Copy SourceFiles="@(PluginOutputFiles)" 
-          DestinationFolder="$(BackendDistPath)\%(RecursiveDir)"
-          SkipUnchangedFiles="true" />
-    
-    <Message Importance="high" Text="Plugin $(PluginId) built to: $(DistOutputPath)" />
-  </Target>
-  
-  <!-- Copy manifest to dist folder -->
-  <Target Name="CopyManifestToDist" AfterTargets="CopyToDistFolder">
-    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\plugin.manifest.json"
-          DestinationFolder="$(DistOutputPath)"
-          SkipUnchangedFiles="true"
-          Condition="Exists('$(MSBuildProjectDirectory)\..\plugin.manifest.json')" />
-  </Target>
-
-  <!-- Build frontend UI -->
-  <Target Name="BuildFrontend" AfterTargets="CopyManifestToDist" Condition="Exists('$(MSBuildProjectDirectory)\..\ui\package.json')">
-    <PropertyGroup>
-      <UiPath>$(MSBuildProjectDirectory)\..\ui</UiPath>
-      <FrontendDistPath>$(DistOutputPath)\frontend</FrontendDistPath>
-    </PropertyGroup>
-    
-    <!-- Install dependencies if node_modules doesn't exist -->
-    <Exec Command="pnpm install" WorkingDirectory="$(UiPath)" 
-          Condition="!Exists('$(UiPath)\node_modules')" />
-    
-    <!-- Build the frontend -->
-    <Exec Command="pnpm run build" WorkingDirectory="$(UiPath)" />
-    
-    <!-- Create frontend dist folder -->
-    <MakeDir Directories="$(FrontendDistPath)" />
-    
-    <!-- Copy built frontend assets to dist/frontend -->
-    <ItemGroup>
-      <FrontendBuildFiles Include="$(UiPath)\dist\**\*.*" />
-    </ItemGroup>
-    
-    <Copy SourceFiles="@(FrontendBuildFiles)"
-          DestinationFolder="$(FrontendDistPath)\%(RecursiveDir)"
-          SkipUnchangedFiles="true" />
-    
-    <Message Importance="high" Text="Frontend built and copied to: $(FrontendDistPath)" />
-  </Target>
-
-  <!-- Clean dist folder -->
-  <Target Name="CleanDistFolder" AfterTargets="Clean">
-    <RemoveDir Directories="$(DistOutputPath)" Condition="Exists('$(DistOutputPath)')" />
-  </Target>
+  <!-- Build targets are defined in Directory.Build.targets -->
 
 </Project>

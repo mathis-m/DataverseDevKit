@@ -7,8 +7,8 @@ import type {
   PluginCommand,
   EventCallback,
   PluginEvent,
-  QueryResult,
-  ExecuteResult,
+  AuthResult,
+  AuthStatus,
 } from './types';
 
 export class HostBridge {
@@ -53,8 +53,17 @@ export class HostBridge {
 
   private handleMessage(data: string): void {
     try {
-      console.log('[HostBridge] Received message:', data);
-      const message = typeof data === 'string' ? JSON.parse(data) : data;
+      // Decode from base64 (data is base64 encoded to avoid escaping issues)
+      let jsonString: string;
+      try {
+        jsonString = atob(data);
+      } catch {
+        // Fallback: if not base64, assume it's raw JSON (for backward compatibility)
+        jsonString = data;
+      }
+      
+      console.log('[HostBridge] Received message:', jsonString);
+      const message = JSON.parse(jsonString);
 
       // Check if it's an event
       if ('type' in message && 'pluginId' in message) {
@@ -166,12 +175,16 @@ export class HostBridge {
   }
 
   // Authentication
-  async login(connectionId: string): Promise<void> {
-    return this.sendRequest<void>('auth.login', { connectionId });
+  async login(connectionId: string): Promise<AuthResult> {
+    return this.sendRequest<AuthResult>('auth.login', { connectionId });
   }
 
-  async logout(connectionId: string): Promise<void> {
-    return this.sendRequest<void>('auth.logout', { connectionId });
+  async logout(): Promise<boolean> {
+    return this.sendRequest<boolean>('auth.logout');
+  }
+
+  async getAuthStatus(): Promise<AuthStatus> {
+    return this.sendRequest<AuthStatus>('auth.getStatus');
   }
 
   // Plugin management
@@ -208,15 +221,6 @@ export class HostBridge {
         }
       }
     };
-  }
-
-  // Dataverse operations
-  async query(fetchXml: string): Promise<QueryResult> {
-    return this.sendRequest<QueryResult>('dataverse.query', { fetchXml });
-  }
-
-  async execute(requestJson: string): Promise<ExecuteResult> {
-    return this.sendRequest<ExecuteResult>('dataverse.execute', { requestJson });
   }
 
   // Storage
