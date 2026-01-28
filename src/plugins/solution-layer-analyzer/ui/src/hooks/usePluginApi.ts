@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { hostBridge } from '@ddk/host-sdk';
 import { ComponentResult, IndexResponse, IndexCompletionEvent } from '../types';
+import { AnalyticsData } from '../types/analytics';
 
 const PLUGIN_ID = 'com.ddk.solutionlayeranalyzer';
 
@@ -199,6 +200,17 @@ export const usePluginApi = () => {
       indexing,
       querying,
       diffing,
+    },
+    getAnalytics: async (connectionId: string = 'default'): Promise<AnalyticsData> => {
+      try {
+        const payload = JSON.stringify({ connectionId });
+        const result = await hostBridge.invokePluginCommand(PLUGIN_ID, 'getAnalytics', payload);
+        console.log('Analytics data received:', result);
+        return JSON.parse(result);
+      } catch (error) {
+        console.error('Failed to get analytics:', error);
+        throw error;
+      }
     },
   };
 };
