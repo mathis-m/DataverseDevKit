@@ -166,6 +166,18 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
                 Name = "clear",
                 Label = "Clear Index",
                 Description = "Clear the in-memory index"
+            },
+            new()
+            {
+                Name = "fetchSolutions",
+                Label = "Fetch Solutions",
+                Description = "Fetch all available solutions from Dataverse"
+            },
+            new()
+            {
+                Name = "getComponentTypes",
+                Label = "Get Component Types",
+                Description = "Get all supported component types"
             }
         };
 
@@ -195,6 +207,8 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             "details" => await ExecuteDetailsAsync(payload, cancellationToken),
             "diff" => await ExecuteDiffAsync(payload, cancellationToken),
             "clear" => await ExecuteClearAsync(cancellationToken),
+            "fetchSolutions" => await ExecuteFetchSolutionsAsync(payload, cancellationToken),
+            "getComponentTypes" => await ExecuteGetComponentTypesAsync(cancellationToken),
             "saveIndexConfig" => await ExecuteSaveIndexConfigAsync(payload, cancellationToken),
             "loadIndexConfigs" => await ExecuteLoadIndexConfigsAsync(payload, cancellationToken),
             "saveFilterConfig" => await ExecuteSaveFilterConfigAsync(payload, cancellationToken),
@@ -507,6 +521,88 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         {
             _dbLock.Release();
         }
+    }
+
+    private async Task<JsonElement> ExecuteFetchSolutionsAsync(string payload, CancellationToken cancellationToken)
+    {
+        var request = JsonSerializer.Deserialize<FetchSolutionsRequest>(payload, JsonOptions)
+            ?? throw new ArgumentException("Invalid fetchSolutions request payload", nameof(payload));
+
+        _context!.Logger.LogInformation("Fetching solutions from Dataverse");
+
+        var serviceClient = _context.ServiceClientFactory.GetServiceClient(request.ConnectionId);
+
+        var query = new Microsoft.Xrm.Sdk.Query.QueryExpression("solution")
+        {
+            ColumnSet = new Microsoft.Xrm.Sdk.Query.ColumnSet("uniquename", "friendlyname", "version", "ismanaged", "publisherid"),
+            Criteria = new Microsoft.Xrm.Sdk.Query.FilterExpression(Microsoft.Xrm.Sdk.Query.LogicalOperator.And)
+        };
+        
+        // Exclude default/internal solutions
+        query.Criteria.AddCondition("isvisible", Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal, true);
+        query.Criteria.AddCondition("ismanaged", Microsoft.Xrm.Sdk.Query.ConditionOperator.In, true, false);
+
+        var results = await Task.Run(() => serviceClient.RetrieveMultiple(query), cancellationToken);
+
+        var solutions = new List<SolutionInfo>();
+        foreach (var entity in results.Entities)
+        {
+            solutions.Add(new SolutionInfo
+            {
+                UniqueName = entity.GetAttributeValue<string>("uniquename") ?? string.Empty,
+                DisplayName = entity.GetAttributeValue<string>("friendlyname") ?? string.Empty,
+                Version = entity.GetAttributeValue<string>("version") ?? "1.0.0.0",
+                IsManaged = entity.GetAttributeValue<bool>("ismanaged"),
+                Publisher = entity.Contains("publisherid") 
+                    ? ((Microsoft.Xrm.Sdk.EntityReference)entity["publisherid"]).Name 
+                    : null
+            });
+        }
+
+        var response = new FetchSolutionsResponse
+        {
+            Solutions = solutions.OrderBy(s => s.DisplayName).ToList()
+        };
+
+        _context.Logger.LogInformation("Fetched {Count} solutions", solutions.Count);
+
+        return JsonSerializer.SerializeToElement(response, JsonOptions);
+    }
+
+    private Task<JsonElement> ExecuteGetComponentTypesAsync(CancellationToken cancellationToken)
+    {
+        _context!.Logger.LogInformation("Getting component types");
+
+        var componentTypes = new List<ComponentTypeInfo>
+        {
+            new() { Name = "Entity", DisplayName = "Entity (Table)", TypeCode = ComponentTypeCodes.Entity },
+            new() { Name = "Attribute", DisplayName = "Attribute (Column)", TypeCode = ComponentTypeCodes.Attribute },
+            new() { Name = "SystemForm", DisplayName = "Form", TypeCode = ComponentTypeCodes.SystemForm },
+            new() { Name = "SavedQuery", DisplayName = "View", TypeCode = ComponentTypeCodes.SavedQuery },
+            new() { Name = "SavedQueryVisualization", DisplayName = "Chart", TypeCode = ComponentTypeCodes.SavedQueryVisualization },
+            new() { Name = "RibbonCustomization", DisplayName = "Ribbon", TypeCode = ComponentTypeCodes.RibbonCustomization },
+            new() { Name = "WebResource", DisplayName = "Web Resource", TypeCode = ComponentTypeCodes.WebResource },
+            new() { Name = "SDKMessageProcessingStep", DisplayName = "Plugin Step", TypeCode = ComponentTypeCodes.SDKMessageProcessingStep },
+            new() { Name = "Workflow", DisplayName = "Workflow/Business Process Flow", TypeCode = ComponentTypeCodes.Workflow },
+            new() { Name = "AppModule", DisplayName = "Model-Driven App", TypeCode = ComponentTypeCodes.AppModule },
+            new() { Name = "SiteMap", DisplayName = "Sitemap", TypeCode = ComponentTypeCodes.SiteMap },
+            new() { Name = "OptionSet", DisplayName = "Option Set (Choice)", TypeCode = ComponentTypeCodes.OptionSet },
+            new() { Name = "Relationship", DisplayName = "Relationship", TypeCode = ComponentTypeCodes.Relationship },
+            new() { Name = "Report", DisplayName = "Report", TypeCode = ComponentTypeCodes.Report },
+            new() { Name = "EmailTemplate", DisplayName = "Email Template", TypeCode = ComponentTypeCodes.EmailTemplate },
+            new() { Name = "CustomControl", DisplayName = "Custom Control", TypeCode = ComponentTypeCodes.CustomControl },
+            new() { Name = "CustomAPI", DisplayName = "Custom API", TypeCode = ComponentTypeCodes.CustomAPI },
+            new() { Name = "ConnectionRole", DisplayName = "Connection Role", TypeCode = ComponentTypeCodes.ConnectionRole },
+            new() { Name = "ServiceEndpoint", DisplayName = "Service Endpoint", TypeCode = ComponentTypeCodes.ServiceEndpoint },
+            new() { Name = "PluginPackage", DisplayName = "Plugin Package", TypeCode = ComponentTypeCodes.PluginPackage },
+        };
+
+        var response = new GetComponentTypesResponse
+        {
+            ComponentTypes = componentTypes
+        };
+
+        return Task.FromResult(JsonSerializer.SerializeToElement(response, JsonOptions));
     }
 
     /// <inheritdoc/>
