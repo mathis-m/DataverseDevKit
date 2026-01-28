@@ -16,7 +16,8 @@ import {
 import { IndexTab } from './components/IndexTab';
 import { AnalysisTab } from './components/AnalysisTab';
 import { DiffTab } from './components/DiffTab';
-import { ProgressFooter } from './components/ProgressFooter';
+import { Footer } from './components/Footer';
+import { ProgressIndicator } from './components/ProgressIndicator';
 import { SaveConfigDialog } from './components/SaveConfigDialog';
 import { LoadConfigDialog } from './components/LoadConfigDialog';
 import { IndexStats } from './types';
@@ -192,7 +193,7 @@ const Plugin: React.FC<PluginProps> = ({ instanceId }) => {
           />
         )}
       </div>
-      <ProgressFooter />
+      <Footer rightContent={<ProgressIndicator />} />
     </div>
   );
 };
