@@ -123,12 +123,77 @@ export const usePluginApi = () => {
     }
   }, []);
 
+  const saveIndexConfig = useCallback(async (config: {
+    name: string;
+    connectionId: string;
+    sourceSolutions: string[];
+    targetSolutions: string[];
+    componentTypes: string[];
+    payloadMode: string;
+  }): Promise<{ configId: number; configHash: string }> => {
+    try {
+      const payload = JSON.stringify(config);
+      const result = await hostBridge.invokePluginCommand(PLUGIN_ID, 'saveIndexConfig', payload);
+      return typeof result === 'string' ? JSON.parse(result) : result;
+    } catch (error) {
+      console.error('Save index config error:', error);
+      throw error;
+    }
+  }, []);
+
+  const loadIndexConfigs = useCallback(async (request: {
+    connectionId?: string;
+  }): Promise<{ configs: any[] }> => {
+    try {
+      const payload = JSON.stringify(request);
+      const result = await hostBridge.invokePluginCommand(PLUGIN_ID, 'loadIndexConfigs', payload);
+      return typeof result === 'string' ? JSON.parse(result) : result;
+    } catch (error) {
+      console.error('Load index configs error:', error);
+      throw error;
+    }
+  }, []);
+
+  const saveFilterConfig = useCallback(async (config: {
+    name: string;
+    connectionId?: string;
+    originatingIndexHash?: string;
+    filter: any;
+  }): Promise<{ configId: number }> => {
+    try {
+      const payload = JSON.stringify(config);
+      const result = await hostBridge.invokePluginCommand(PLUGIN_ID, 'saveFilterConfig', payload);
+      return typeof result === 'string' ? JSON.parse(result) : result;
+    } catch (error) {
+      console.error('Save filter config error:', error);
+      throw error;
+    }
+  }, []);
+
+  const loadFilterConfigs = useCallback(async (request: {
+    connectionId?: string;
+    currentIndexHash?: string;
+  }): Promise<{ configs: any[] }> => {
+    try {
+      const payload = JSON.stringify(request);
+      const result = await hostBridge.invokePluginCommand(PLUGIN_ID, 'loadFilterConfigs', payload);
+      return typeof result === 'string' ? JSON.parse(result) : result;
+    } catch (error) {
+      console.error('Load filter configs error:', error);
+      throw error;
+    }
+  }, []);
+
   return {
     indexSolutions,
     queryComponents,
     getComponentDetails,
     diffComponentLayers,
     clearIndex,
+    saveIndexConfig,
+    loadIndexConfigs,
+    saveFilterConfig,
+    loadFilterConfigs,
     indexCompletion,
     loading: {
       indexing,
