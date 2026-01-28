@@ -109,12 +109,12 @@ public class AnalyticsService
                     Solution1 = sol1.UniqueName,
                     Solution2 = sol2.UniqueName,
                     TotalOverlap = overlappingComponents.Count,
-                    ManagedOverlap = overlappingComponents.Count(c => c.IsManaged),
-                    UnmanagedOverlap = overlappingComponents.Count(c => !c.IsManaged),
+                    ManagedOverlap = overlappingComponents.Count(c => c.Layers.All(l => l.IsManaged)),
+                    UnmanagedOverlap = overlappingComponents.Count(c => !c.Layers.All(l => l.IsManaged)),
                     ComponentTypeBreakdown = overlappingComponents
                         .GroupBy(c => c.ComponentType)
                         .ToDictionary(g => g.Key, g => g.Count()),
-                    Severity = DetermineSeverity(overlappingComponents.Count, overlappingComponents.Any(c => !c.IsManaged))
+                    Severity = DetermineSeverity(overlappingComponents.Count, overlappingComponents.Any(c => !c.Layers.All(l => l.IsManaged)))
                 };
 
                 detailedOverlaps.Add(detail);
@@ -146,7 +146,7 @@ public class AnalyticsService
 
             var topLayer = layers.Last();
             var baseLayer = layers.First();
-            var hasUnmanaged = layers.Any(l => !l.Managed);
+            var hasUnmanaged = layers.Any(l => !l.IsManaged);
             var violations = new List<string>();
 
             // Detect violations
@@ -203,7 +203,7 @@ public class AnalyticsService
             if (!layers.Any()) continue;
 
             // Violation: Unmanaged override
-            var unmanagedLayers = layers.Where(l => !l.Managed).ToList();
+            var unmanagedLayers = layers.Where(l => !l.IsManaged).ToList();
             if (unmanagedLayers.Any() && layers.Count > 1)
             {
                 violations.Add(new ViolationItem
@@ -271,7 +271,7 @@ public class AnalyticsService
                 IsManaged = solution.IsManaged,
                 Publisher = solution.Publisher ?? "Unknown",
                 TotalLayers = solutionLayers.Count,
-                UnmanagedLayers = solutionLayers.Count(l => !l.Managed),
+                UnmanagedLayers = solutionLayers.Count(l => !l.IsManaged),
                 ComponentsModified = componentIds.Count,
                 ComponentTypeBreakdown = solutionLayers
                     .GroupBy(l => l.Component?.ComponentType ?? "Unknown")
