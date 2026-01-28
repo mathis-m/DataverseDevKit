@@ -56,16 +56,16 @@ DataverseDevKit uses a layered architecture with clear separation of concerns an
 ┌─────────────────────────────────────────────────────────────────┐
 │                         User Interface                          │
 │                                                                 │
-│  ┌───────────────────────────────────────────────────────────┐ │
-│  │              Shell UI (React + TypeScript)                 │ │
-│  │  • Connection Management  • Plugin Marketplace             │ │
-│  │  • Tab Workspace         • Settings & Themes              │ │
-│  │                                                            │ │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │ │
-│  │  │  Plugin UI 1 │  │  Plugin UI 2 │  │  Plugin UI n │   │ │
-│  │  │ (Module Fed) │  │ (Module Fed) │  │ (Module Fed) │   │ │
-│  │  └──────────────┘  └──────────────┘  └──────────────┘   │ │
-│  └───────────────────────────────────────────────────────────┘ │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │              Shell UI (React + TypeScript)                │  │ 
+│  │  • Connection Management  • Plugin Marketplace            │  │
+│  │  • Tab Workspace         • Settings & Themes              │  │
+│  │                                                           │  │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │  │
+│  │  │  Plugin UI 1 │  │  Plugin UI 2 │  │  Plugin UI n │     │  │
+│  │  │ (Module Fed) │  │ (Module Fed) │  │ (Module Fed) │     │  │
+│  │  └──────────────┘  └──────────────┘  └──────────────┘     │  │
+│  └───────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
                               ↕
                       JSON-RPC over HybridWebView
@@ -73,12 +73,12 @@ DataverseDevKit uses a layered architecture with clear separation of concerns an
 ┌─────────────────────────────────────────────────────────────────┐
 │                       MAUI Host (.NET)                          │
 │                                                                 │
-│  ┌──────────────────┐     ┌─────────────────────────────────┐ │
-│  │  JSON-RPC Bridge │     │   Core Services                 │ │
-│  │  • Method Router │     │   • PluginHostManager           │ │
-│  │  • Event Emitter │     │   • ConnectionService           │ │
-│  └──────────────────┘     │   • TokenCallbackServer         │ │
-│                           └─────────────────────────────────┘ │
+│  ┌──────────────────┐     ┌─────────────────────────────────┐   │
+│  │  JSON-RPC Bridge │     │   Core Services                 │   │
+│  │  • Method Router │     │   • PluginHostManager           │   │
+│  │  • Event Emitter │     │   • ConnectionService           │   │
+│  └──────────────────┘     │   • TokenCallbackServer         │   │
+│                           └─────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
                               ↕
                     gRPC over Unix Domain Socket
@@ -86,12 +86,12 @@ DataverseDevKit uses a layered architecture with clear separation of concerns an
 ┌─────────────────────────────────────────────────────────────────┐
 │                  Plugin Runtime Worker (.NET)                   │
 │                                                                 │
-│  ┌──────────────────┐     ┌─────────────────────────────────┐ │
-│  │  gRPC Server     │     │   Plugin Loader                 │ │
-│  │  • PluginHost    │     │   • Assembly Isolation          │ │
-│  │  • TokenProvider │     │   • Dependency Management       │ │
-│  └──────────────────┘     │   • Plugin Load Context         │ │
-│                           └─────────────────────────────────┘ │
+│  ┌──────────────────┐     ┌─────────────────────────────────┐   │
+│  │  gRPC Server     │     │   Plugin Loader                 │   │
+│  │  • PluginHost    │     │   • Assembly Isolation          │   │
+│  │  • TokenProvider │     │   • Dependency Management       │   │
+│  └──────────────────┘     │   • Plugin Load Context         │   │
+│                           └─────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
                               ↕
                        Plugin Interface (IToolPlugin)
@@ -99,12 +99,12 @@ DataverseDevKit uses a layered architecture with clear separation of concerns an
 ┌─────────────────────────────────────────────────────────────────┐
 │                         Plugin DLLs                             │
 │                                                                 │
-│  ┌──────────────────────┐    ┌──────────────────────────────┐ │
-│  │ Solution Layer       │    │ Custom Plugins               │ │
-│  │ Analyzer             │    │ • Community                  │ │
-│  │ • In-memory SQLite   │    │ • Third-party                │ │
-│  │ • EF Core            │    │ • Organization-specific      │ │
-│  └──────────────────────┘    └──────────────────────────────┘ │
+│  ┌──────────────────────┐    ┌──────────────────────────────┐   │
+│  │ Solution Layer       │    │ Custom Plugins               │   │
+│  │ Analyzer             │    │ • Community                  │   │
+│  │ • In-memory SQLite   │    │ • Third-party                │   │
+│  │ • EF Core            │    │ • Organization-specific      │   │
+│  └──────────────────────┘    └──────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
                               ↕
                      Microsoft Dataverse APIs
