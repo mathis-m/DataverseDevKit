@@ -12,9 +12,11 @@ import {
 import {
   DismissRegular,
   BranchCompareRegular,
+  EyeRegular,
 } from '@fluentui/react-icons';
 import { ComponentResult, Layer } from '../types';
 import { usePluginApi } from '../hooks/usePluginApi';
+import { LayerViewerDialog } from './LayerViewerDialog';
 
 const useStyles = makeStyles({
   panel: {
@@ -88,6 +90,8 @@ export const ComponentDetailPanel: React.FC<ComponentDetailPanelProps> = ({
   const [layers, setLayers] = useState<Layer[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedLayers, setSelectedLayers] = useState<string[]>([]);
+  const [viewLayerDialogOpen, setViewLayerDialogOpen] = useState(false);
+  const [layerToView, setLayerToView] = useState<Layer | null>(null);
 
   useEffect(() => {
     const loadDetails = async () => {
@@ -120,6 +124,16 @@ export const ComponentDetailPanel: React.FC<ComponentDetailPanelProps> = ({
   const handleDiff = () => {
     if (selectedLayers.length === 2) {
       onDiff(selectedLayers[0], selectedLayers[1]);
+    }
+  };
+
+  const handleViewLayer = () => {
+    if (selectedLayers.length === 1) {
+      const layer = layers.find(l => l.solutionName === selectedLayers[0]);
+      if (layer && layer.componentJson) {
+        setLayerToView(layer);
+        setViewLayerDialogOpen(true);
+      }
     }
   };
 
@@ -178,16 +192,28 @@ export const ComponentDetailPanel: React.FC<ComponentDetailPanelProps> = ({
             <Text weight="semibold">
               Layer Stack <Badge appearance="outline">{layers.length || component.layerSequence.length}</Badge>
             </Text>
-            {selectedLayers.length === 2 && (
-              <Button
-                size="small"
-                appearance="primary"
-                icon={<BranchCompareRegular />}
-                onClick={handleDiff}
-              >
-                Compare
-              </Button>
-            )}
+            <div style={{ display: 'flex', gap: tokens.spacingHorizontalS }}>
+              {selectedLayers.length === 1 && layers.some(l => l.solutionName === selectedLayers[0] && l.componentJson) && (
+                <Button
+                  size="small"
+                  appearance="secondary"
+                  icon={<EyeRegular />}
+                  onClick={handleViewLayer}
+                >
+                  View
+                </Button>
+              )}
+              {selectedLayers.length === 2 && (
+                <Button
+                  size="small"
+                  appearance="primary"
+                  icon={<BranchCompareRegular />}
+                  onClick={handleDiff}
+                >
+                  Compare
+                </Button>
+              )}
+            </div>
           </div>
           {loading && <Spinner size="small" label="Loading layers..." />}
           {!loading && layers.length === 0 && component.layerSequence.length > 0 && (
@@ -264,14 +290,28 @@ export const ComponentDetailPanel: React.FC<ComponentDetailPanelProps> = ({
         {selectedLayers.length > 0 && (
           <Card style={{ padding: tokens.spacingVerticalS, backgroundColor: tokens.colorBrandBackground2 }}>
             <Text size={200}>
-              Selected for comparison: <strong>{selectedLayers.join(' vs ')}</strong>
+              Selected for {selectedLayers.length === 1 ? 'viewing' : 'comparison'}: <strong>{selectedLayers.join(' vs ')}</strong>
             </Text>
             <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
-              {selectedLayers.length === 1 ? 'Select one more layer to compare' : 'Click Compare to view diff'}
+              {selectedLayers.length === 1 ? 'Click View to see attributes or select another to compare' : 'Click Compare to view diff'}
             </Text>
           </Card>
         )}
       </div>
+
+      {/* Layer Viewer Dialog */}
+      {layerToView && (
+        <LayerViewerDialog
+          isOpen={viewLayerDialogOpen}
+          onClose={() => {
+            setViewLayerDialogOpen(false);
+            setLayerToView(null);
+          }}
+          solutionName={layerToView.solutionName}
+          componentJson={layerToView.componentJson || '{}'}
+          changedAttributesJson={layerToView.changes}
+        />
+      )}
     </div>
   );
 };

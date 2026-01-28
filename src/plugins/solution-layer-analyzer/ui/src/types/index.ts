@@ -16,6 +16,8 @@ export interface Layer {
   version?: string;
   ordinal: number;
   createdOn?: string;
+  componentJson?: string; // Full entity attributes from msdyn_componentjson
+  changes?: string; // Changed attributes from msdyn_changes
 }
 
 export interface IndexStats {

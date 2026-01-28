@@ -313,7 +313,9 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
                         IsManaged = l.IsManaged,
                         Version = l.Version,
                         CreatedOn = l.CreatedOn,
-                        Ordinal = l.Ordinal
+                        Ordinal = l.Ordinal,
+                        ComponentJson = l.ComponentJson,
+                        Changes = null // msdyn_changes would need to be retrieved separately if needed
                     })
                     .ToList()
             };

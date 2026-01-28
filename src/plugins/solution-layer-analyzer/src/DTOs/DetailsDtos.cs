@@ -56,4 +56,15 @@ public sealed record LayerDetail
     /// Gets the ordinal position.
     /// </summary>
     public int Ordinal { get; init; }
+
+    /// <summary>
+    /// Gets the component JSON from msdyn_componentjson field.
+    /// Contains the full entity attributes for this layer.
+    /// </summary>
+    public string? ComponentJson { get; init; }
+
+    /// <summary>
+    /// Gets the changed attributes from msdyn_changes field.
+    /// </summary>
+    public string? Changes { get; init; }
 }
