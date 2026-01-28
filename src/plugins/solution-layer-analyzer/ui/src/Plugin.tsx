@@ -12,11 +12,13 @@ import {
   DatabaseRegular,
   ChartMultipleRegular,
   CodeRegular,
+  ChartPerson24Regular,
 } from '@fluentui/react-icons';
 import { IndexTab } from './components/IndexTab';
 import { ImprovedIndexTab } from './components/ImprovedIndexTab';
 import { AnalysisTab } from './components/AnalysisTab';
 import { DiffTab } from './components/DiffTab';
+import { AnalysisDashboard } from './components/AnalysisDashboard';
 import { Footer } from './components/Footer';
 import { ProgressIndicator } from './components/ProgressIndicator';
 import { SaveConfigDialog } from './components/SaveConfigDialog';
@@ -174,6 +176,7 @@ const Plugin: React.FC<PluginProps> = ({ instanceId }) => {
         <TabList selectedValue={selectedTab} onTabSelect={(_, d) => setSelectedTab(d.value as string)}>
           <Tab icon={<DatabaseRegular />} value="index">Index</Tab>
           <Tab icon={<ChartMultipleRegular />} value="analysis">Analysis</Tab>
+          <Tab icon={<ChartPerson24Regular />} value="advanced">Advanced Analytics</Tab>
           <Tab icon={<CodeRegular />} value="diff">Diff</Tab>
         </TabList>
 
@@ -183,6 +186,10 @@ const Plugin: React.FC<PluginProps> = ({ instanceId }) => {
 
         {selectedTab === 'analysis' && (
           <AnalysisTab onNavigateToDiff={handleNavigateToDiff} />
+        )}
+
+        {selectedTab === 'advanced' && (
+          <AnalysisDashboard connectionId="default" />
         )}
 
         {selectedTab === 'diff' && (
