@@ -34,6 +34,16 @@ public sealed class AnalyzerDbContext : DbContext
     public DbSet<IndexOperation> IndexOperations => Set<IndexOperation>();
 
     /// <summary>
+    /// Gets or sets the SavedIndexConfigs table.
+    /// </summary>
+    public DbSet<SavedIndexConfig> SavedIndexConfigs => Set<SavedIndexConfig>();
+
+    /// <summary>
+    /// Gets or sets the SavedFilterConfigs table.
+    /// </summary>
+    public DbSet<SavedFilterConfig> SavedFilterConfigs => Set<SavedFilterConfig>();
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="AnalyzerDbContext"/> class.
     /// </summary>
     public AnalyzerDbContext()
@@ -106,6 +116,24 @@ public sealed class AnalyzerDbContext : DbContext
             entity.HasKey(e => e.OperationId);
             entity.HasIndex(e => e.Status);
             entity.HasIndex(e => e.StartedAt);
+        });
+
+        // Configure SavedIndexConfig entity
+        modelBuilder.Entity<SavedIndexConfig>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.ConnectionId);
+            entity.HasIndex(e => e.ConfigHash);
+            entity.HasIndex(e => e.CreatedAt);
+        });
+
+        // Configure SavedFilterConfig entity
+        modelBuilder.Entity<SavedFilterConfig>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.ConnectionId);
+            entity.HasIndex(e => e.OriginatingIndexHash);
+            entity.HasIndex(e => e.CreatedAt);
         });
     }
 }

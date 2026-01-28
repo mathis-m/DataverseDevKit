@@ -195,6 +195,10 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             "details" => await ExecuteDetailsAsync(payload, cancellationToken),
             "diff" => await ExecuteDiffAsync(payload, cancellationToken),
             "clear" => await ExecuteClearAsync(cancellationToken),
+            "saveIndexConfig" => await ExecuteSaveIndexConfigAsync(payload, cancellationToken),
+            "loadIndexConfigs" => await ExecuteLoadIndexConfigsAsync(payload, cancellationToken),
+            "saveFilterConfig" => await ExecuteSaveFilterConfigAsync(payload, cancellationToken),
+            "loadFilterConfigs" => await ExecuteLoadFilterConfigsAsync(payload, cancellationToken),
             _ => throw new ArgumentException($"Unknown command: {commandName}", nameof(commandName))
         };
     }
@@ -409,6 +413,94 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             await dbContext.SaveChangesAsync(cancellationToken);
 
             var response = new { Success = true, Message = "Index cleared successfully" };
+            return JsonSerializer.SerializeToElement(response, JsonOptions);
+        }
+        finally
+        {
+            _dbLock.Release();
+        }
+    }
+
+    private async Task<JsonElement> ExecuteSaveIndexConfigAsync(string payload, CancellationToken cancellationToken)
+    {
+        var request = JsonSerializer.Deserialize<SaveIndexConfigRequest>(payload, JsonOptions)
+            ?? throw new ArgumentException("Invalid saveIndexConfig request payload", nameof(payload));
+
+        _context!.Logger.LogInformation("Saving index config: {Name}", request.Name);
+
+        await _dbLock.WaitAsync(cancellationToken);
+        try
+        {
+            await using var dbContext = CreateDbContext();
+            var configService = new ConfigService(dbContext, _context.Logger);
+            var response = await configService.SaveIndexConfigAsync(request, cancellationToken);
+
+            return JsonSerializer.SerializeToElement(response, JsonOptions);
+        }
+        finally
+        {
+            _dbLock.Release();
+        }
+    }
+
+    private async Task<JsonElement> ExecuteLoadIndexConfigsAsync(string payload, CancellationToken cancellationToken)
+    {
+        var request = JsonSerializer.Deserialize<LoadIndexConfigsRequest>(payload, JsonOptions)
+            ?? throw new ArgumentException("Invalid loadIndexConfigs request payload", nameof(payload));
+
+        _context!.Logger.LogInformation("Loading index configs");
+
+        await _dbLock.WaitAsync(cancellationToken);
+        try
+        {
+            await using var dbContext = CreateDbContext();
+            var configService = new ConfigService(dbContext, _context.Logger);
+            var response = await configService.LoadIndexConfigsAsync(request, cancellationToken);
+
+            return JsonSerializer.SerializeToElement(response, JsonOptions);
+        }
+        finally
+        {
+            _dbLock.Release();
+        }
+    }
+
+    private async Task<JsonElement> ExecuteSaveFilterConfigAsync(string payload, CancellationToken cancellationToken)
+    {
+        var request = JsonSerializer.Deserialize<SaveFilterConfigRequest>(payload, JsonOptions)
+            ?? throw new ArgumentException("Invalid saveFilterConfig request payload", nameof(payload));
+
+        _context!.Logger.LogInformation("Saving filter config: {Name}", request.Name);
+
+        await _dbLock.WaitAsync(cancellationToken);
+        try
+        {
+            await using var dbContext = CreateDbContext();
+            var configService = new ConfigService(dbContext, _context.Logger);
+            var response = await configService.SaveFilterConfigAsync(request, cancellationToken);
+
+            return JsonSerializer.SerializeToElement(response, JsonOptions);
+        }
+        finally
+        {
+            _dbLock.Release();
+        }
+    }
+
+    private async Task<JsonElement> ExecuteLoadFilterConfigsAsync(string payload, CancellationToken cancellationToken)
+    {
+        var request = JsonSerializer.Deserialize<LoadFilterConfigsRequest>(payload, JsonOptions)
+            ?? throw new ArgumentException("Invalid loadFilterConfigs request payload", nameof(payload));
+
+        _context!.Logger.LogInformation("Loading filter configs");
+
+        await _dbLock.WaitAsync(cancellationToken);
+        try
+        {
+            await using var dbContext = CreateDbContext();
+            var configService = new ConfigService(dbContext, _context.Logger);
+            var response = await configService.LoadFilterConfigsAsync(request, cancellationToken);
+
             return JsonSerializer.SerializeToElement(response, JsonOptions);
         }
         finally
