@@ -10,7 +10,8 @@ import {
   Button,
   Checkbox,
   Input,
-  Label,
+  Field,
+  InfoLabel,
   makeStyles,
   shorthands,
   tokens,
@@ -114,23 +115,28 @@ export const SaveConfigDialog: React.FC<SaveConfigDialogProps> = ({
                 }}
                 label="Save Index Config"
               />
-              {saveIndex && (
-                <>
-                  <Label>Name:</Label>
-                  <Input
-                    className={styles.input}
-                    value={indexName}
-                    onChange={(_, data) => {
-                      setIndexName(data.value);
-                      if (!filterName && saveFilter) {
-                        setFilterName(data.value);
-                      }
-                    }}
-                    placeholder="e.g., Production Index"
-                  />
-                </>
-              )}
             </div>
+            {saveIndex && (
+              <Field
+                label={
+                  <InfoLabel info="Give your index configuration a descriptive name to easily identify it later. This includes solutions and component types selected.">
+                    Index Configuration Name
+                  </InfoLabel>
+                }
+                required
+              >
+                <Input
+                  value={indexName}
+                  onChange={(_, data) => {
+                    setIndexName(data.value);
+                    if (!filterName && saveFilter) {
+                      setFilterName(data.value);
+                    }
+                  }}
+                  placeholder="e.g., Production Index"
+                />
+              </Field>
+            )}
 
             <div className={styles.checkboxRow}>
               <Checkbox
@@ -138,18 +144,23 @@ export const SaveConfigDialog: React.FC<SaveConfigDialogProps> = ({
                 onChange={(_, data) => setSaveFilter(!!data.checked)}
                 label="Save Filter Config"
               />
-              {saveFilter && (
-                <>
-                  <Label>Name:</Label>
-                  <Input
-                    className={styles.input}
-                    value={filterName}
-                    onChange={(_, data) => setFilterName(data.value)}
-                    placeholder={indexName || 'e.g., My Filter'}
-                  />
-                </>
-              )}
             </div>
+            {saveFilter && (
+              <Field
+                label={
+                  <InfoLabel info="Name your filter configuration to save your current analysis criteria. This will auto-fill from index name if available.">
+                    Filter Configuration Name
+                  </InfoLabel>
+                }
+                required
+              >
+                <Input
+                  value={filterName}
+                  onChange={(_, data) => setFilterName(data.value)}
+                  placeholder={indexName || 'e.g., My Filter'}
+                />
+              </Field>
+            )}
           </DialogContent>
           <DialogActions>
             <DialogTrigger disableButtonEnhancement>

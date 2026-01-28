@@ -11,6 +11,7 @@ import {
   MessageBar,
   MessageBarBody,
   Field,
+  InfoLabel,
   Combobox,
   Option,
   Tag,
@@ -219,7 +220,15 @@ export const ImprovedIndexTab: React.FC<IndexTabProps> = ({ onIndexComplete }) =
           </MessageBar>
         )}
 
-        <Field label="Source Solutions" hint="Solutions where components originate">
+        <Field 
+          label={
+            <InfoLabel info="Select the base or core solutions that contain the original components. These are typically your foundation solutions that other solutions layer on top of.">
+              Source Solutions
+            </InfoLabel>
+          }
+          hint="Solutions where components originate"
+          required
+        >
           {loadingSolutions ? (
             <Spinner size="tiny" />
           ) : (
@@ -265,7 +274,15 @@ export const ImprovedIndexTab: React.FC<IndexTabProps> = ({ onIndexComplete }) =
           )}
         </Field>
 
-        <Field label="Target Solutions" hint="Solutions to analyze for layering">
+        <Field 
+          label={
+            <InfoLabel info="Select the project or customization solutions that may layer components on top of source solutions. These are analyzed to identify layering patterns and potential conflicts.">
+              Target Solutions
+            </InfoLabel>
+          }
+          hint="Solutions to analyze for layering"
+          required
+        >
           {loadingSolutions ? (
             <Spinner size="tiny" />
           ) : (
@@ -312,7 +329,11 @@ export const ImprovedIndexTab: React.FC<IndexTabProps> = ({ onIndexComplete }) =
         </Field>
 
         <Field 
-          label="Component Types" 
+          label={
+            <InfoLabel info="Choose which types of components to include in the index. All types are selected by default for comprehensive analysis. You can deselect types that are not relevant to your analysis.">
+              Component Types
+            </InfoLabel>
+          }
           hint={`${selectedComponentTypes.length} of ${allComponentTypes.length} types selected`}
         >
           {loadingComponentTypes ? (

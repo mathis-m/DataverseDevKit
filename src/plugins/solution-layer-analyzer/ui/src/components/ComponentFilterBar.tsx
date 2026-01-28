@@ -3,7 +3,7 @@ import {
   makeStyles,
   tokens,
   Input,
-  Label,
+  Field,
   Dropdown,
   Option,
   Badge,
@@ -132,20 +132,18 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
   return (
     <div>
       <div className={styles.filterBar}>
-        <div className={styles.filterField}>
-          <Label>Search</Label>
+        <Field label="Search" className={styles.filterField}>
           <Input
             contentBefore={<SearchRegular />}
             value={searchText}
             onChange={(_, d) => setSearchText(d.value)}
             placeholder="Search components..."
           />
-        </div>
+        </Field>
 
         {!advancedMode && (
           <>
-            <div className={styles.filterField}>
-              <Label>Component Type</Label>
+            <Field label="Component Type" className={styles.filterField}>
               <Dropdown
                 multiselect
                 placeholder="All types"
@@ -159,10 +157,9 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
                   <Option key={type} value={type}>{type}</Option>
                 ))}
               </Dropdown>
-            </div>
+            </Field>
 
-            <div className={styles.filterField}>
-              <Label>Solution</Label>
+            <Field label="Solution" className={styles.filterField}>
               <Dropdown
                 multiselect
                 placeholder="All solutions"
@@ -176,10 +173,9 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
                   <Option key={solution} value={solution}>{solution}</Option>
                 ))}
               </Dropdown>
-            </div>
+            </Field>
 
-            <div className={styles.filterField}>
-              <Label>Managed</Label>
+            <Field label="Managed" className={styles.filterField}>
               <Dropdown
                 value={managedFilter === 'all' ? 'All' : managedFilter === 'managed' ? 'Managed' : 'Unmanaged'}
                 onOptionSelect={(_, data) => setManagedFilter(data.optionValue || 'all')}
@@ -188,7 +184,7 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
                 <Option value="managed">Managed</Option>
                 <Option value="unmanaged">Unmanaged</Option>
               </Dropdown>
-            </div>
+            </Field>
           </>
         )}
 

@@ -8,6 +8,7 @@ import {
   Button,
   Input,
   Field,
+  InfoLabel,
   Spinner,
   Badge,
   Divider,
@@ -316,7 +317,14 @@ export const DiffTab: React.FC<DiffTabProps> = ({
           </Button>
         )}
 
-        <Field label="Component ID">
+        <Field 
+          label={
+            <InfoLabel info="Enter the component GUID to compare. You can select a component from the Analysis tab or paste a GUID directly.">
+              Component ID
+            </InfoLabel>
+          }
+          required
+        >
           <Input 
             value={componentId} 
             onChange={(_, d) => setComponentId(d.value)}
@@ -325,14 +333,30 @@ export const DiffTab: React.FC<DiffTabProps> = ({
         </Field>
 
         <div className={styles.inputRow}>
-          <Field label="Left Solution" style={{ flex: 1 }}>
+          <Field 
+            label={
+              <InfoLabel info="The base or source solution to compare from. This is typically your core or earlier solution.">
+                Left Solution
+              </InfoLabel>
+            }
+            style={{ flex: 1 }}
+            required
+          >
             <Input 
               value={leftSolution} 
               onChange={(_, d) => setLeftSolution(d.value)}
               placeholder="CoreSolution" 
             />
           </Field>
-          <Field label="Right Solution" style={{ flex: 1 }}>
+          <Field 
+            label={
+              <InfoLabel info="The target solution to compare against. This shows changes made by this solution on top of the left solution.">
+                Right Solution
+              </InfoLabel>
+            }
+            style={{ flex: 1 }}
+            required
+          >
             <Input 
               value={rightSolution} 
               onChange={(_, d) => setRightSolution(d.value)}

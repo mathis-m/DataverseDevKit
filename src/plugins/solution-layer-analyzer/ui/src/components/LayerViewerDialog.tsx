@@ -7,6 +7,7 @@ import {
   DialogActions,
   Button,
   Input,
+  Field,
   Text,
   Badge,
   makeStyles,
@@ -188,13 +189,14 @@ export const LayerViewerDialog: React.FC<LayerViewerDialogProps> = ({
         </DialogTitle>
         <DialogBody>
           <div className={styles.searchBar}>
-            <Input
-              placeholder="Search by key or value..."
-              contentBefore={<SearchRegular />}
-              value={searchTerm}
-              onChange={(_, data) => setSearchTerm(data.value)}
-              style={{ flex: 1 }}
-            />
+            <Field label="Search attributes" style={{ flex: 1 }}>
+              <Input
+                placeholder="Search by key or value..."
+                contentBefore={<SearchRegular />}
+                value={searchTerm}
+                onChange={(_, data) => setSearchTerm(data.value)}
+              />
+            </Field>
             {changedAttributes.size > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
                 <Switch
