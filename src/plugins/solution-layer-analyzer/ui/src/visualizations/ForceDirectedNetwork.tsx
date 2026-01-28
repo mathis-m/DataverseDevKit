@@ -159,7 +159,7 @@ export const ForceDirectedNetwork: React.FC<ForceDirectedNetworkProps> = ({
       simulation.stop();
       tooltip.remove();
     };
-  }, [data, width, height, selectedNodes, onNodeClick, transform]);
+  }, [data, width, height, selectedNodes, onNodeClick]);
 
   const handleZoomIn = () => {
     if (svgRef.current) {

@@ -69,24 +69,24 @@ export function hideTooltip(
 export function createDragBehavior<T extends d3.SimulationNodeDatum>(
   simulation: d3.Simulation<T, undefined>
 ) {
-  function dragstarted(event: d3.D3DragEvent<SVGCircleElement, T, T>) {
+  function dragstarted(event: d3.D3DragEvent<any, T, T>) {
     if (!event.active) simulation.alphaTarget(0.3).restart();
     event.subject.fx = event.subject.x;
     event.subject.fy = event.subject.y;
   }
   
-  function dragged(event: d3.D3DragEvent<SVGCircleElement, T, T>) {
+  function dragged(event: d3.D3DragEvent<any, T, T>) {
     event.subject.fx = event.x;
     event.subject.fy = event.y;
   }
   
-  function dragended(event: d3.D3DragEvent<SVGCircleElement, T, T>) {
+  function dragended(event: d3.D3DragEvent<any, T, T>) {
     if (!event.active) simulation.alphaTarget(0);
     event.subject.fx = null;
     event.subject.fy = null;
   }
   
-  return d3.drag<SVGCircleElement, T>()
+  return d3.drag<any, T>()
     .on('start', dragstarted)
     .on('drag', dragged)
     .on('end', dragended);

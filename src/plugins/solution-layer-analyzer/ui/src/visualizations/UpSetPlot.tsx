@@ -233,7 +233,7 @@ export const UpSetPlot: React.FC<UpSetPlotProps> = ({
     return () => {
       tooltip.remove();
     };
-  }, [data, width, height, sortBy, selectedIntersection, onIntersectionClick, transform]);
+  }, [data, width, height, sortBy, selectedIntersection, onIntersectionClick]);
 
   const handleZoomIn = () => {
     if (svgRef.current) {

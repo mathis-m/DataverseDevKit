@@ -34,7 +34,16 @@ export const ChordDiagram: React.FC<ChordDiagramProps> = ({
     // Create tooltip
     const tooltip = createTooltip('chord-diagram-tooltip');
 
-    // Setup zoom
+    // Calculate dimensions
+    const outerRadius = Math.min(width, height) * 0.4;
+    const innerRadius = outerRadius - 30;
+    const centerX = width / 2;
+    const centerY = height / 2;
+
+    // Center the diagram first
+    g.attr('transform', `translate(${centerX},${centerY})`);
+
+    // Setup zoom after centering
     const zoom = d3.zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.5, 5])
       .on('zoom', (event) => {
@@ -43,15 +52,6 @@ export const ChordDiagram: React.FC<ChordDiagramProps> = ({
       });
 
     svg.call(zoom);
-
-    // Calculate dimensions
-    const outerRadius = Math.min(width, height) * 0.4;
-    const innerRadius = outerRadius - 30;
-    const centerX = width / 2;
-    const centerY = height / 2;
-
-    // Center the diagram
-    g.attr('transform', `translate(${centerX},${centerY})`);
 
     // Create chord layout
     const chord = d3.chord()
@@ -97,12 +97,7 @@ export const ChordDiagram: React.FC<ChordDiagramProps> = ({
         const severity = getSeverityForChord(d.source.index, d.target.index);
         return getSeverityColor(severity as any);
       })
-      .style('opacity', d => {
-        if (!hoveredChord) return 0.6;
-        return (hoveredChord.source === d.source.index && hoveredChord.target === d.target.index) ||
-               (hoveredChord.source === d.target.index && hoveredChord.target === d.source.index)
-          ? 0.9 : 0.1;
-      })
+      .style('opacity', 0.6)
       .style('stroke', d => {
         const severity = getSeverityForChord(d.source.index, d.target.index);
         return getSeverityColor(severity as any);
@@ -111,6 +106,18 @@ export const ChordDiagram: React.FC<ChordDiagramProps> = ({
       .style('cursor', 'pointer')
       .on('mouseover', function(event, d) {
         setHoveredChord({ source: d.source.index, target: d.target.index });
+        
+        // Update all ribbons
+        ribbonGroup.style('opacity', (chord: any) => {
+          return (chord.source.index === d.source.index && chord.target.index === d.target.index) ||
+                 (chord.source.index === d.target.index && chord.target.index === d.source.index)
+            ? 0.9 : 0.1;
+        });
+        
+        // Update arcs
+        arcGroup.selectAll('path').style('opacity', (group: any) => {
+          return group.index === d.source.index || group.index === d.target.index ? 1 : 0.3;
+        });
         
         const detail = data.chordDetails.find(
           cd => (cd.source === d.source.index && cd.target === d.target.index) ||
@@ -133,6 +140,11 @@ export const ChordDiagram: React.FC<ChordDiagramProps> = ({
       })
       .on('mouseout', () => {
         setHoveredChord(null);
+        
+        // Reset all ribbons and arcs
+        ribbonGroup.style('opacity', 0.6);
+        arcGroup.selectAll('path').style('opacity', 1);
+        
         hideTooltip(tooltip);
       })
       .on('click', (event, d) => {
@@ -154,10 +166,7 @@ export const ChordDiagram: React.FC<ChordDiagramProps> = ({
       .style('fill', d => colorScale(data.solutions[d.index]))
       .style('stroke', '#fff')
       .style('stroke-width', 2)
-      .style('opacity', d => {
-        if (!hoveredChord) return 1;
-        return hoveredChord.source === d.index || hoveredChord.target === d.index ? 1 : 0.3;
-      })
+      .style('opacity', 1)
       .style('cursor', 'pointer')
       .on('mouseover', function(event, d) {
         const totalOverlap = d3.sum(data.matrix[d.index]);
@@ -192,7 +201,7 @@ export const ChordDiagram: React.FC<ChordDiagramProps> = ({
     return () => {
       tooltip.remove();
     };
-  }, [data, width, height, hoveredChord, onChordClick, transform]);
+  }, [data, width, height, hoveredChord, onChordClick]);
 
   const handleZoomIn = () => {
     if (svgRef.current) {

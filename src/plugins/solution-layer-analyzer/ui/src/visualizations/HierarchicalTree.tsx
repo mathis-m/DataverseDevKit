@@ -222,21 +222,6 @@ export const HierarchicalTree: React.FC<HierarchicalTreeProps> = ({
           .y(() => source.x + centerX)
         )
         .remove();
-
-      // Highlight path to selected node
-      if (selectedNodeId) {
-        const selectedNode = nodes.find(n => n.data.name === selectedNodeId);
-        if (selectedNode) {
-          const path = selectedNode.ancestors();
-          g.selectAll('path.link')
-            .style('stroke', (d: any) => {
-              return path.includes(d.target) ? '#0078D4' : '#ccc';
-            })
-            .style('stroke-width', (d: any) => {
-              return path.includes(d.target) ? 3 : 2;
-            });
-        }
-      }
     }
 
     function toggle(d: TreeNode) {
@@ -255,11 +240,53 @@ export const HierarchicalTree: React.FC<HierarchicalTreeProps> = ({
     // Apply initial transform
     svg.call(zoom.transform as any, transform);
 
+    // Store reference for highlighting updates
+    (svg.node() as any).__treeData = treeData;
+
     // Cleanup
     return () => {
       tooltip.remove();
     };
-  }, [data, width, height, selectedNodeId, onNodeClick, transform]);
+  }, [data, width, height, onNodeClick]);
+
+  // Separate effect to handle path highlighting when selection changes
+  useEffect(() => {
+    if (!svgRef.current) return;
+    
+    const svg = d3.select(svgRef.current);
+    const treeData = (svg.node() as any).__treeData;
+    
+    if (!treeData) return;
+    
+    const g = svg.select('g.main-group');
+    const nodes = treeData.descendants();
+    
+    if (selectedNodeId) {
+      const selectedNode = nodes.find((n: TreeNode) => n.data.name === selectedNodeId);
+      if (selectedNode) {
+        const path = selectedNode.ancestors();
+        g.selectAll('path.link')
+          .style('stroke', (d: any) => {
+            return path.includes(d.target) ? '#0078D4' : '#ccc';
+          })
+          .style('stroke-width', (d: any) => {
+            return path.includes(d.target) ? 3 : 2;
+          });
+        
+        g.selectAll('g.node circle')
+          .style('stroke', (d: TreeNode) => d.data.name === selectedNodeId ? '#000' : '#fff')
+          .style('stroke-width', (d: TreeNode) => d.data.name === selectedNodeId ? 3 : 2);
+      }
+    } else {
+      g.selectAll('path.link')
+        .style('stroke', '#ccc')
+        .style('stroke-width', 2);
+      
+      g.selectAll('g.node circle')
+        .style('stroke', '#fff')
+        .style('stroke-width', 2);
+    }
+  }, [selectedNodeId]);
 
   const handleZoomIn = () => {
     if (svgRef.current) {

@@ -21,6 +21,11 @@ export const EnhancedRiskHeatmap: React.FC<EnhancedRiskHeatmapProps> = ({
   const svgRef = useRef<SVGSVGElement>(null);
   const [transform, setTransform] = useState<d3.ZoomTransform>(d3.zoomIdentity);
   const [hoveredCell, setHoveredCell] = useState<{ row: string; col: string } | null>(null);
+  const hoveredCellRef = useRef<{ row: string; col: string } | null>(null);
+
+  useEffect(() => {
+    hoveredCellRef.current = hoveredCell;
+  }, [hoveredCell]);
 
   useEffect(() => {
     if (!svgRef.current || !Object.keys(data.matrix).length) return;
@@ -103,12 +108,38 @@ export const EnhancedRiskHeatmap: React.FC<EnhancedRiskHeatmapProps> = ({
           .attr('width', cellSize)
           .attr('height', cellSize)
           .attr('fill', value > 0 ? colorScale(value) : '#fff')
-          .attr('stroke', hoveredCell?.row === rowSolution || hoveredCell?.col === colSolution ? '#000' : '#ddd')
-          .attr('stroke-width', hoveredCell?.row === rowSolution || hoveredCell?.col === colSolution ? 3 : 1)
+          .attr('stroke', '#ddd')
+          .attr('stroke-width', 1)
           .style('cursor', value > 0 ? 'pointer' : 'default')
           .on('mouseover', function(event) {
             if (value > 0) {
               setHoveredCell({ row: rowSolution, col: colSolution });
+              
+              // Update all cells for row/column highlighting
+              g.selectAll('.cell rect')
+                .attr('stroke', function(this: SVGRectElement) {
+                  const cell = d3.select(this.parentNode as SVGGElement);
+                  const transform = cell.attr('transform');
+                  const match = transform.match(/translate\((\d+),(\d+)\)/);
+                  if (!match) return '#ddd';
+                  const cellColIndex = Math.round(parseFloat(match[1]) / cellSize);
+                  const cellRowIndex = Math.round(parseFloat(match[2]) / cellSize);
+                  const cellRowSolution = solutions[cellRowIndex];
+                  const cellColSolution = solutions[cellColIndex];
+                  return cellRowSolution === rowSolution || cellColSolution === colSolution ? '#000' : '#ddd';
+                })
+                .attr('stroke-width', function(this: SVGRectElement) {
+                  const cell = d3.select(this.parentNode as SVGGElement);
+                  const transform = cell.attr('transform');
+                  const match = transform.match(/translate\((\d+),(\d+)\)/);
+                  if (!match) return 1;
+                  const cellColIndex = Math.round(parseFloat(match[1]) / cellSize);
+                  const cellRowIndex = Math.round(parseFloat(match[2]) / cellSize);
+                  const cellRowSolution = solutions[cellRowIndex];
+                  const cellColSolution = solutions[cellColIndex];
+                  return cellRowSolution === rowSolution || cellColSolution === colSolution ? 3 : 1;
+                });
+              
               d3.select(this)
                 .attr('stroke', '#000')
                 .attr('stroke-width', 3);
@@ -133,9 +164,12 @@ export const EnhancedRiskHeatmap: React.FC<EnhancedRiskHeatmapProps> = ({
           .on('mouseout', function() {
             if (value > 0) {
               setHoveredCell(null);
-              d3.select(this)
+              
+              // Reset all cells
+              g.selectAll('.cell rect')
                 .attr('stroke', '#ddd')
                 .attr('stroke-width', 1);
+                
               hideTooltip(tooltip);
             }
           })
@@ -229,7 +263,7 @@ export const EnhancedRiskHeatmap: React.FC<EnhancedRiskHeatmapProps> = ({
     return () => {
       tooltip.remove();
     };
-  }, [data, width, height, hoveredCell, onCellClick, transform]);
+  }, [data, width, height, hoveredCell, onCellClick]);
 
   const handleZoomIn = () => {
     if (svgRef.current) {
