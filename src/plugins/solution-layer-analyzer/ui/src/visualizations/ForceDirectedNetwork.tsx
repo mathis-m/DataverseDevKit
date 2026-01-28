@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
-import { NetworkGraphData, NetworkNode, NetworkLink, getRiskColor } from '../types/analytics';
-import { createTooltip, showTooltip, hideTooltip, createDragBehavior, formatNumber } from '../utils/d3-helpers';
+import { NetworkGraphData, NetworkNode, getRiskColor } from '../types/analytics';
+import { createTooltip, showTooltip, hideTooltip, createDragBehavior } from '../utils/d3-helpers';
 import { Button } from '@fluentui/react-components';
 import { ZoomIn24Regular, ZoomOut24Regular, ArrowReset24Regular } from '@fluentui/react-icons';
 
@@ -13,8 +13,13 @@ interface ForceDirectedNetworkProps {
   selectedNodes?: string[];
 }
 
-interface SimulationNode extends NetworkNode, d3.SimulationNodeDatum {}
-interface SimulationLink extends NetworkLink, d3.SimulationLinkDatum<SimulationNode> {}
+type SimulationNode = NetworkNode & d3.SimulationNodeDatum;
+type SimulationLink = d3.SimulationLinkDatum<SimulationNode> & {
+  source: string | SimulationNode;
+  target: string | SimulationNode;
+  value: number;
+  type: string;
+};
 
 export const ForceDirectedNetwork: React.FC<ForceDirectedNetworkProps> = ({
   data,
@@ -50,11 +55,23 @@ export const ForceDirectedNetwork: React.FC<ForceDirectedNetworkProps> = ({
 
     // Prepare data
     const nodes: SimulationNode[] = data.nodes.map(d => ({ ...d }));
-    const links: SimulationLink[] = data.links.map(d => ({
-      ...d,
-      source: d.source,
-      target: d.target
-    }));
+    const nodeIds = new Set(nodes.map(n => n.id));
+    
+    // Filter out links that reference non-existent nodes (e.g., from empty SolutionIds)
+    const links: SimulationLink[] = data.links
+      .filter(d => nodeIds.has(d.source) && nodeIds.has(d.target))
+      .map(d => ({
+        ...d,
+        source: d.source,
+        target: d.target
+      }));
+
+    const resolveEndpoint = (endpoint: string | SimulationNode): SimulationNode | undefined => {
+      if (typeof endpoint === 'string') {
+        return nodes.find(node => node.id === endpoint);
+      }
+      return endpoint;
+    };
 
     // Color scale
     const colorScale = d3.scaleOrdinal<string>()
@@ -121,7 +138,7 @@ export const ForceDirectedNetwork: React.FC<ForceDirectedNetworkProps> = ({
         `;
         showTooltip(tooltip, content, event);
       })
-      .on('mouseout', function(event, d) {
+      .on('mouseout', function(_, d) {
         d3.select(this)
           .transition()
           .duration(200)
@@ -143,10 +160,10 @@ export const ForceDirectedNetwork: React.FC<ForceDirectedNetworkProps> = ({
     // Update positions on tick
     simulation.on('tick', () => {
       link
-        .attr('x1', d => (d.source as SimulationNode).x!)
-        .attr('y1', d => (d.source as SimulationNode).y!)
-        .attr('x2', d => (d.target as SimulationNode).x!)
-        .attr('y2', d => (d.target as SimulationNode).y!);
+        .attr('x1', d => resolveEndpoint(d.source)?.x ?? 0)
+        .attr('y1', d => resolveEndpoint(d.source)?.y ?? 0)
+        .attr('x2', d => resolveEndpoint(d.target)?.x ?? 0)
+        .attr('y2', d => resolveEndpoint(d.target)?.y ?? 0);
 
       node.attr('transform', d => `translate(${d.x},${d.y})`);
     });

@@ -334,7 +334,8 @@ public class AnalyticsService
             });
 
             // Add links from solutions to this component
-            foreach (var layer in component.Layers)
+            // Only create links for layers with valid SolutionIds (skip Guid.Empty)
+            foreach (var layer in component.Layers.Where(l => l.SolutionId != Guid.Empty))
             {
                 links.Add(new NetworkLink
                 {

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
-import { HierarchyData, getSeverityColor } from '../types/analytics';
+import { HierarchyData } from '../types/analytics';
 import { createTooltip, showTooltip, hideTooltip } from '../utils/d3-helpers';
 import { Button } from '@fluentui/react-components';
 import { ZoomIn24Regular, ZoomOut24Regular, ArrowReset24Regular } from '@fluentui/react-icons';
@@ -62,7 +62,7 @@ export const HierarchicalTree: React.FC<HierarchicalTreeProps> = ({
     root.descendants().forEach((d: any) => {
       if (d.depth > 2 && d.children) {
         d._children = d.children;
-        d.children = null;
+        d.children = undefined;
       }
     });
 
@@ -173,9 +173,10 @@ export const HierarchicalTree: React.FC<HierarchicalTreeProps> = ({
         .duration(500)
         .attr('transform', d => `translate(${d.y + centerY},${d.x + centerX})`);
 
-      nodeUpdate.select('circle')
-        .style('stroke', d => d.data.name === selectedNodeId ? '#000' : '#fff')
-        .style('stroke-width', d => d.data.name === selectedNodeId ? 3 : 2);
+      const updatedCircles = nodeUpdate.selectAll<SVGCircleElement, TreeNode>('circle');
+      (updatedCircles as any)
+        .style('stroke', (d: TreeNode) => (d.data.name === selectedNodeId ? '#000' : '#fff'))
+        .style('stroke-width', (d: TreeNode) => (d.data.name === selectedNodeId ? 3 : 2));
 
       nodeUpdate.select('.toggle-indicator')
         .text(d => {
@@ -227,10 +228,10 @@ export const HierarchicalTree: React.FC<HierarchicalTreeProps> = ({
     function toggle(d: TreeNode) {
       if (d.children) {
         d._children = d.children;
-        d.children = null;
+        d.children = undefined;
       } else if (d._children) {
         d.children = d._children;
-        d._children = null;
+        d._children = undefined;
       }
     }
 
@@ -273,16 +274,18 @@ export const HierarchicalTree: React.FC<HierarchicalTreeProps> = ({
             return path.includes(d.target) ? 3 : 2;
           });
         
-        g.selectAll('g.node circle')
-          .style('stroke', (d: TreeNode) => d.data.name === selectedNodeId ? '#000' : '#fff')
-          .style('stroke-width', (d: TreeNode) => d.data.name === selectedNodeId ? 3 : 2);
+        const circleSelection = g.selectAll<SVGCircleElement, TreeNode>('g.node circle');
+        (circleSelection as any)
+          .style('stroke', (d: TreeNode) => (d.data.name === selectedNodeId ? '#000' : '#fff'))
+          .style('stroke-width', (d: TreeNode) => (d.data.name === selectedNodeId ? 3 : 2));
       }
     } else {
       g.selectAll('path.link')
         .style('stroke', '#ccc')
         .style('stroke-width', 2);
       
-      g.selectAll('g.node circle')
+      const circleSelection = g.selectAll('g.node circle');
+      circleSelection
         .style('stroke', '#fff')
         .style('stroke-width', 2);
     }

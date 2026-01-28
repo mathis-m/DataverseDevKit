@@ -2,11 +2,25 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { IndexStats, FilterNode, ComponentResult } from '../types';
 
+export interface Solution {
+  uniqueName: string;
+  displayName: string;
+  version: string;
+  isManaged: boolean;
+  publisher?: string;
+}
+
+export interface ComponentType {
+  name: string;
+  displayName: string;
+  typeCode: number;
+}
+
 export interface IndexConfig {
   connectionId?: string;
   sourceSolutions: string[];
   targetSolutions: string[];
-  includeComponentTypes: string[];
+  componentTypes: string[];
   payloadMode: 'lazy' | 'eager';
 }
 
@@ -22,7 +36,18 @@ export interface ProgressOperation {
   phase?: string;
 }
 
+export interface DiffState {
+  componentId?: string;
+  leftSolution?: string;
+  rightSolution?: string;
+}
+
 interface AppState {
+  // Global metadata (loaded once)
+  availableSolutions: Solution[];
+  availableComponentTypes: ComponentType[];
+  metadataLoaded: boolean;
+  
   // Index state
   indexConfig: IndexConfig;
   indexStats: IndexStats | null;
@@ -33,20 +58,21 @@ interface AppState {
   selectedComponentId: string | null;
   
   // Diff state
-  diffComponentId: string | undefined;
-  diffLeftSolution: string | undefined;
-  diffRightSolution: string | undefined;
+  diffState: DiffState | null;
   
   // Progress tracking
   operations: ProgressOperation[];
   
   // Actions
+  setAvailableSolutions: (solutions: Solution[]) => void;
+  setAvailableComponentTypes: (types: ComponentType[]) => void;
+  setMetadataLoaded: (loaded: boolean) => void;
   setIndexConfig: (config: Partial<IndexConfig>) => void;
   setIndexStats: (stats: IndexStats | null) => void;
   setComponents: (components: ComponentResult[]) => void;
   setFilterConfig: (config: FilterConfig) => void;
   setSelectedComponentId: (id: string | null) => void;
-  setDiffState: (componentId?: string, leftSolution?: string, rightSolution?: string) => void;
+  setDiffState: (state: DiffState | null) => void;
   
   // Progress actions
   addOperation: (operation: ProgressOperation) => void;
@@ -58,19 +84,20 @@ interface AppState {
 }
 
 const initialState = {
+  availableSolutions: [] as Solution[],
+  availableComponentTypes: [] as ComponentType[],
+  metadataLoaded: false,
   indexConfig: {
     sourceSolutions: [],
     targetSolutions: [],
-    includeComponentTypes: ['SystemForm', 'SavedQuery', 'Entity', 'Attribute', 'RibbonCustomization'],
+    componentTypes: ['SystemForm', 'SavedQuery', 'Entity', 'Attribute', 'RibbonCustomization'],
     payloadMode: 'lazy' as const,
   },
   indexStats: null,
   components: [],
   filterConfig: { filters: null },
   selectedComponentId: null,
-  diffComponentId: undefined,
-  diffLeftSolution: undefined,
-  diffRightSolution: undefined,
+  diffState: null,
   operations: [],
 };
 
@@ -78,6 +105,12 @@ export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
       ...initialState,
+      
+      setAvailableSolutions: (solutions) => set({ availableSolutions: solutions }),
+      
+      setAvailableComponentTypes: (types) => set({ availableComponentTypes: types }),
+      
+      setMetadataLoaded: (loaded) => set({ metadataLoaded: loaded }),
       
       setIndexConfig: (config) =>
         set((state) => ({
@@ -92,8 +125,7 @@ export const useAppStore = create<AppState>()(
       
       setSelectedComponentId: (id) => set({ selectedComponentId: id }),
       
-      setDiffState: (componentId, leftSolution, rightSolution) =>
-        set({ diffComponentId: componentId, diffLeftSolution: leftSolution, diffRightSolution: rightSolution }),
+      setDiffState: (state) => set({ diffState: state }),
       
       addOperation: (operation) =>
         set((state) => ({

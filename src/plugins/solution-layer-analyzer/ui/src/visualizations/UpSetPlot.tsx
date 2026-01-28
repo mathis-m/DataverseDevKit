@@ -90,12 +90,12 @@ export const UpSetPlot: React.FC<UpSetPlotProps> = ({
     barGroup.selectAll('rect')
       .data(sortedIntersections)
       .join('rect')
-      .attr('x', (d, i) => xScale(i.toString())!)
+      .attr('x', (_, i) => xScale(i.toString())!)
       .attr('y', d => barHeight - barScale(d.size))
       .attr('width', xScale.bandwidth())
       .attr('height', d => barScale(d.size))
       .attr('fill', d => colorScale(d.size))
-      .attr('stroke', (d, i) => i === selectedIntersection ? '#000' : 'none')
+      .attr('stroke', (_, i) => i === selectedIntersection ? '#000' : 'none')
       .attr('stroke-width', 3)
       .style('cursor', 'pointer')
       .on('mouseover', function(event, d) {
@@ -129,7 +129,7 @@ export const UpSetPlot: React.FC<UpSetPlotProps> = ({
     barGroup.selectAll('text')
       .data(sortedIntersections)
       .join('text')
-      .attr('x', (d, i) => xScale(i.toString())! + xScale.bandwidth() / 2)
+      .attr('x', (_, i) => xScale(i.toString())! + xScale.bandwidth() / 2)
       .attr('y', d => barHeight - barScale(d.size) - 5)
       .attr('text-anchor', 'middle')
       .attr('font-size', '10px')
@@ -218,13 +218,13 @@ export const UpSetPlot: React.FC<UpSetPlotProps> = ({
     xAxisGroup.selectAll('text')
       .data(sortedIntersections)
       .join('text')
-      .attr('x', (d, i) => xScale(i.toString())! + xScale.bandwidth() / 2)
+      .attr('x', (_, i) => xScale(i.toString())! + xScale.bandwidth() / 2)
       .attr('y', 0)
       .attr('text-anchor', 'start')
       .attr('font-size', '10px')
       .attr('fill', '#666')
-      .attr('transform', (d, i) => `rotate(45, ${xScale(i.toString())! + xScale.bandwidth() / 2}, 0)`)
-      .text((d, i) => `Set ${i + 1}`);
+      .attr('transform', (_, i) => `rotate(45, ${xScale(i.toString())! + xScale.bandwidth() / 2}, 0)`)
+      .text((_, i) => `Set ${i + 1}`);
 
     // Apply initial transform
     svg.call(zoom.transform as any, transform);

@@ -20,7 +20,7 @@ public class CustomHybridWebViewHandler : Microsoft.Maui.Handlers.HybridWebViewH
         {
             if (platformView.CoreWebView2 != null)
             {
-#if DEBUG
+#if false
                 var coreWebView2 = platformView.CoreWebView2;
                 
                 // Add filter for localhost URLs (dev servers)

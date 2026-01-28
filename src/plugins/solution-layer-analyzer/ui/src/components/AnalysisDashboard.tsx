@@ -28,6 +28,14 @@ interface AnalysisDashboardProps {
 
 type VisualizationType = 'force' | 'tree' | 'chord' | 'upset' | 'heatmap';
 
+const VISUALIZATION_LABELS: Record<VisualizationType, string> = {
+  force: 'Force-Directed Network',
+  tree: 'Hierarchical Tree',
+  chord: 'Chord Diagram',
+  upset: 'UpSet Plot',
+  heatmap: 'Risk Heatmap',
+};
+
 export const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({
   connectionId = 'default'
 }) => {
@@ -98,7 +106,7 @@ export const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({
             width={width}
             height={height}
             onNodeClick={handleNodeClick}
-            selectedNodeId={selectedNodeId}
+            selectedNodeId={selectedNodeId ?? undefined}
           />
         );
       case 'chord':
@@ -231,7 +239,7 @@ export const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({
           <div style={{ marginBottom: '16px' }}>
             <Select
               value={selectedVisualization}
-              onChange={(e, data) => handleVisualizationChange(data.value as VisualizationType)}
+              onChange={(_, data) => handleVisualizationChange(data.value as VisualizationType)}
             >
               <option value="force">Force-Directed Network</option>
               <option value="tree">Hierarchical Tree</option>
@@ -285,11 +293,13 @@ export const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({
       </Card>
 
       {/* Fullscreen Modal */}
-      {showModal && (
-        <VisualizationModal onClose={() => setShowModal(false)}>
-          {renderVisualization(selectedVisualization, 'fullscreen')}
-        </VisualizationModal>
-      )}
+      <VisualizationModal
+        isOpen={showModal}
+        onClose={() => setShowModal(false)}
+        title={VISUALIZATION_LABELS[selectedVisualization]}
+      >
+        {renderVisualization(selectedVisualization, 'fullscreen')}
+      </VisualizationModal>
     </div>
   );
 };

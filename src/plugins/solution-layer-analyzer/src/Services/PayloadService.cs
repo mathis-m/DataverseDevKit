@@ -247,6 +247,7 @@ public class PayloadService
 
     /// <summary>
     /// Normalizes JSON for diffing (pretty-print, consistent formatting).
+    /// Recursively normalizes nested JSON strings within attribute values.
     /// </summary>
     private string NormalizeJson(string json)
     {
@@ -258,7 +259,8 @@ public class PayloadService
         try
         {
             using var doc = JsonDocument.Parse(json);
-            return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions
+            var normalized = NormalizeJsonElement(doc.RootElement);
+            return JsonSerializer.Serialize(normalized, new JsonSerializerOptions
             {
                 WriteIndented = true
             });
@@ -268,5 +270,88 @@ public class PayloadService
             // If JSON is invalid, return as-is
             return json;
         }
+    }
+
+    /// <summary>
+    /// Recursively normalizes a JsonElement, detecting and parsing nested JSON strings.
+    /// </summary>
+    private object? NormalizeJsonElement(JsonElement element)
+    {
+        return element.ValueKind switch
+        {
+            JsonValueKind.Object => NormalizeJsonObject(element),
+            JsonValueKind.Array => NormalizeJsonArray(element),
+            JsonValueKind.String => NormalizeJsonString(element.GetString()),
+            JsonValueKind.Number => element.TryGetInt64(out var l) ? l : element.GetDouble(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Null => null,
+            _ => element.GetRawText()
+        };
+    }
+
+    /// <summary>
+    /// Normalizes a JSON object by recursively normalizing its properties.
+    /// </summary>
+    private Dictionary<string, object?> NormalizeJsonObject(JsonElement element)
+    {
+        var result = new Dictionary<string, object?>();
+        foreach (var property in element.EnumerateObject())
+        {
+            result[property.Name] = NormalizeJsonElement(property.Value);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Normalizes a JSON array by recursively normalizing its elements.
+    /// </summary>
+    private List<object?> NormalizeJsonArray(JsonElement element)
+    {
+        var result = new List<object?>();
+        foreach (var item in element.EnumerateArray())
+        {
+            result.Add(NormalizeJsonElement(item));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Normalizes a string value, attempting to parse it as nested JSON if possible.
+    /// This handles double-encoded JSON strings from Dataverse componentjson.
+    /// </summary>
+    private object? NormalizeJsonString(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+
+        var trimmed = value.Trim();
+
+        // Check if the string looks like it could be JSON (object or array)
+        if ((trimmed.StartsWith('{') && trimmed.EndsWith('}')) ||
+            (trimmed.StartsWith('[') && trimmed.EndsWith(']')))
+        {
+            try
+            {
+                using var nestedDoc = JsonDocument.Parse(trimmed);
+                // Successfully parsed as JSON - recursively normalize it
+                return NormalizeJsonElement(nestedDoc.RootElement);
+            }
+            catch (JsonException)
+            {
+                // Not valid JSON, return as string
+                return value;
+            }
+        }
+
+        // Check if the string looks like XML and normalize it
+        if (trimmed.StartsWith('<') && trimmed.EndsWith('>'))
+        {
+            return NormalizeXml(value);
+        }
+
+        return value;
     }
 }

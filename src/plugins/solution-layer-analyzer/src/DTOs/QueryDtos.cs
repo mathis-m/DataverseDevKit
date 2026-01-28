@@ -8,6 +8,11 @@ namespace Ddk.SolutionLayerAnalyzer.DTOs;
 public sealed record QueryRequest
 {
     /// <summary>
+    /// Gets the connection ID for identifying the database.
+    /// </summary>
+    public string ConnectionId { get; init; } = string.Empty;
+
+    /// <summary>
     /// Gets the filters (AST).
     /// </summary>
     public FilterNode? Filters { get; init; }

@@ -308,7 +308,7 @@ export const ComponentDetailPanel: React.FC<ComponentDetailPanelProps> = ({
             setLayerToView(null);
           }}
           solutionName={layerToView.solutionName}
-          componentJson={layerToView.componentJson || '{}'}
+          componentJson={layerToView.componentJson}
           changedAttributesJson={layerToView.changes}
         />
       )}

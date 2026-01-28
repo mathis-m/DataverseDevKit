@@ -4,7 +4,8 @@ using Ddk.SolutionLayerAnalyzer.Models;
 namespace Ddk.SolutionLayerAnalyzer.Data;
 
 /// <summary>
-/// DbContext for the in-memory solution layer analysis database.
+/// DbContext for the solution layer analysis database.
+/// Data is persisted to a SQLite file in the local application data folder.
 /// </summary>
 public sealed class AnalyzerDbContext : DbContext
 {
@@ -44,6 +45,11 @@ public sealed class AnalyzerDbContext : DbContext
     public DbSet<SavedFilterConfig> SavedFilterConfigs => Set<SavedFilterConfig>();
 
     /// <summary>
+    /// Gets or sets the ComponentNameCache table.
+    /// </summary>
+    public DbSet<ComponentNameCache> ComponentNameCache => Set<ComponentNameCache>();
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="AnalyzerDbContext"/> class.
     /// </summary>
     public AnalyzerDbContext()
@@ -64,8 +70,12 @@ public sealed class AnalyzerDbContext : DbContext
     {
         if (!optionsBuilder.IsConfigured)
         {
-            // Use in-memory SQLite database
-            optionsBuilder.UseSqlite("Data Source=:memory:");
+            // Use file-based SQLite database in local app data
+            var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var dbDirectory = Path.Combine(appDataPath, "DataverseDevKit", "SolutionLayerAnalyzer");
+            Directory.CreateDirectory(dbDirectory);
+            var dbPath = Path.Combine(dbDirectory, "analyzer.db");
+            optionsBuilder.UseSqlite($"Data Source={dbPath}");
         }
     }
 
@@ -134,6 +144,15 @@ public sealed class AnalyzerDbContext : DbContext
             entity.HasIndex(e => e.ConnectionId);
             entity.HasIndex(e => e.OriginatingIndexHash);
             entity.HasIndex(e => e.CreatedAt);
+        });
+
+        // Configure ComponentNameCache entity
+        modelBuilder.Entity<ComponentNameCache>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => new { e.ObjectId, e.ComponentTypeCode }).IsUnique();
+            entity.HasIndex(e => e.LogicalName);
+            entity.HasIndex(e => e.TableLogicalName);
         });
     }
 }

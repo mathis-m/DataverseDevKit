@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { ComponentResult } from '../types';
-import { makeStyles, tokens, Button, Text } from '@fluentui/react-components';
+import { makeStyles, tokens, Button } from '@fluentui/react-components';
 import { ZoomIn20Regular, ZoomOut20Regular, ArrowReset20Regular } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({

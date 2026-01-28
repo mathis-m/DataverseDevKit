@@ -18,8 +18,9 @@ import {
   TableRegular,
   ArrowMaximize20Regular,
 } from '@fluentui/react-icons';
-import { ComponentResult, GroupByOption } from '../types';
+import { ComponentResult, GroupByOption, FilterNode } from '../types';
 import { usePluginApi } from '../hooks/usePluginApi';
+import { useAppStore } from '../store/useAppStore';
 import { ComponentFilterBar } from './ComponentFilterBar';
 import { ComponentList } from './ComponentList';
 import { ComponentDetailPanel } from './ComponentDetailPanel';
@@ -62,27 +63,33 @@ interface AnalysisTabProps {
 export const AnalysisTab: React.FC<AnalysisTabProps> = ({ onNavigateToDiff }) => {
   const styles = useStyles();
   const { queryComponents, loading } = usePluginApi();
+  const { availableSolutions } = useAppStore();
 
   const [allComponents, setAllComponents] = useState<ComponentResult[]>([]);
   const [filteredComponents, setFilteredComponents] = useState<ComponentResult[]>([]);
   const [selectedComponent, setSelectedComponent] = useState<ComponentResult | null>(null);
+  const [advancedFilter, setAdvancedFilter] = useState<FilterNode | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'visualizations'>('list');
   const [visualizationType, setVisualizationType] = useState<'sankey' | 'heatmap' | 'stacked' | 'network' | 'circle' | 'treemap'>('network');
   const [groupBy, setGroupBy] = useState<GroupByOption>('componentType');
   const [fullscreenViz, setFullscreenViz] = useState<boolean>(false);
 
-  const loadComponents = useCallback(async () => {
-    const components = await queryComponents();
+  const loadComponents = useCallback(async (filter?: FilterNode | null) => {
+    const components = await queryComponents(filter);
     setAllComponents(components);
     setFilteredComponents(components);
   }, [queryComponents]);
 
   React.useEffect(() => {
-    loadComponents();
-  }, [loadComponents]);
+    loadComponents(advancedFilter);
+  }, [loadComponents, advancedFilter]);
 
   const handleFilterChange = useCallback((filtered: ComponentResult[]) => {
     setFilteredComponents(filtered);
+  }, []);
+
+  const handleAdvancedFilterChange = useCallback((filter: FilterNode | null) => {
+    setAdvancedFilter(filter);
   }, []);
 
   const handleSelectComponent = useCallback((component: ComponentResult) => {
@@ -120,7 +127,7 @@ export const AnalysisTab: React.FC<AnalysisTabProps> = ({ onNavigateToDiff }) =>
             <Button 
               appearance="primary" 
               icon={<FilterRegular />}
-              onClick={loadComponents}
+              onClick={() => loadComponents(advancedFilter)}
               disabled={loading.querying}
             >
               {loading.querying ? 'Loading...' : 'Refresh'}
@@ -154,7 +161,9 @@ export const AnalysisTab: React.FC<AnalysisTabProps> = ({ onNavigateToDiff }) =>
 
           <ComponentFilterBar
             components={allComponents}
+            availableSolutions={availableSolutions.map(s => s.uniqueName)}
             onFilterChange={handleFilterChange}
+            onAdvancedFilterChange={handleAdvancedFilterChange}
             loading={loading.querying}
           />
         </div>

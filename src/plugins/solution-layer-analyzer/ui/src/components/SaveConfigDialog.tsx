@@ -14,7 +14,6 @@ import {
   InfoLabel,
   makeStyles,
   shorthands,
-  tokens,
 } from '@fluentui/react-components';
 import { Save24Regular } from '@fluentui/react-icons';
 import { useAppStore } from '../store/useAppStore';
@@ -62,7 +61,7 @@ export const SaveConfigDialog: React.FC<SaveConfigDialogProps> = ({
       if (saveIndex && indexConfig) {
         await saveIndexConfig({
           name: indexName,
-          connectionId: indexConfig.connectionId || '',
+          connectionId: indexConfig.connectionId || 'default',
           sourceSolutions: indexConfig.sourceSolutions || [],
           targetSolutions: indexConfig.targetSolutions || [],
           componentTypes: indexConfig.componentTypes || [],
@@ -70,12 +69,12 @@ export const SaveConfigDialog: React.FC<SaveConfigDialogProps> = ({
         });
       }
 
-      if (saveFilter && filterConfig) {
+      if (saveFilter && filterConfig?.filters) {
         await saveFilterConfig({
           name: filterName,
           connectionId: currentConnectionId,
           originatingIndexHash: currentIndexHash,
-          filter: filterConfig,
+          filter: filterConfig.filters,
         });
       }
 

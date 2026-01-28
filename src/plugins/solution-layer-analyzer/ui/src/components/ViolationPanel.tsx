@@ -9,13 +9,7 @@ import {
   Text,
   Title3,
 } from '@fluentui/react-components';
-import {
-  ErrorCircle24Regular,
-  Warning24Regular,
-  Info24Regular,
-  ChevronDown24Regular,
-  ChevronUp24Regular,
-} from '@fluentui/react-icons';
+import { ErrorCircle24Regular, Warning24Regular, Info24Regular } from '@fluentui/react-icons';
 import { ViolationItem, SeverityLevel, getSeverityColor } from '../types/analytics';
 
 interface ViolationPanelProps {
@@ -29,7 +23,6 @@ export const ViolationPanel: React.FC<ViolationPanelProps> = ({
   onViolationClick,
   selectedViolations = []
 }) => {
-  const [expandedItems, setExpandedItems] = useState<string[]>([]);
   const [filterSeverity, setFilterSeverity] = useState<SeverityLevel | 'all'>('all');
   const [sortBy, setSortBy] = useState<'severity' | 'type'>('severity');
 
@@ -64,6 +57,7 @@ export const ViolationPanel: React.FC<ViolationPanelProps> = ({
       critical: 0,
       high: 0,
       medium: 0,
+      normal: 0,
       low: 0
     };
     violations.forEach(v => {
@@ -82,12 +76,6 @@ export const ViolationPanel: React.FC<ViolationPanelProps> = ({
       case 'low':
         return <Info24Regular style={{ color: getSeverityColor(severity) }} />;
     }
-  };
-
-  const handleToggle = (value: string) => {
-    setExpandedItems(prev =>
-      prev.includes(value) ? prev.filter(v => v !== value) : [...prev, value]
-    );
   };
 
   if (violations.length === 0) {
@@ -186,7 +174,6 @@ export const ViolationPanel: React.FC<ViolationPanelProps> = ({
               <AccordionHeader
                 expandIconPosition="end"
                 icon={getSeverityIcon(severity)}
-                onClick={() => handleToggle(groupKey)}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
                   <Text weight="semibold">

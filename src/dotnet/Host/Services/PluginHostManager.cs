@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Text.Json;
-using System.Text.Encodings.Web;
 using Microsoft.Extensions.Logging;
 using Grpc.Net.Client;
 using DataverseDevKit.PluginHost.Contracts;
@@ -23,8 +22,7 @@ public sealed class PluginHostManager : IDisposable
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
     private readonly ILogger<PluginHostManager> _logger;
@@ -32,6 +30,7 @@ public sealed class PluginHostManager : IDisposable
     private readonly TokenCallbackServer _tokenCallbackServer;
     private readonly ConnectionService _connectionService;
     private readonly Dictionary<string, PluginWorkerInfo> _workers = new();
+    private readonly Dictionary<string, TaskCompletionSource<PluginWorkerInfo>> _pendingStarts = new();
     private readonly string _pluginsBasePath;
     private readonly HttpClient _httpClient;
     private readonly object _lock = new();
@@ -192,10 +191,13 @@ public sealed class PluginHostManager : IDisposable
     public async Task<PluginInstanceInfo> StartPluginInstanceAsync(string pluginId, string instanceId)
     {
         var workerKey = GetWorkerKey(pluginId, instanceId);
+        Task<PluginWorkerInfo>? waitTask = null;
+        TaskCompletionSource<PluginWorkerInfo>? tcs = null;
 
         lock (_lock)
         {
-            if (_workers.TryGetValue(workerKey, out var existing))
+            // Check if worker already exists
+            if (_workers.TryGetValue(workerKey, out _))
             {
                 return new PluginInstanceInfo
                 {
@@ -204,51 +206,93 @@ public sealed class PluginHostManager : IDisposable
                     IsNew = false
                 };
             }
+
+            // Check if another caller is already starting this worker
+            if (_pendingStarts.TryGetValue(workerKey, out var pendingTcs))
+            {
+                _logger.LogDebug("Another caller is starting plugin {PluginId} (instance: {InstanceId}), waiting...", 
+                    pluginId, instanceId);
+                waitTask = pendingTcs.Task;
+            }
+            else
+            {
+                // We're the first - create pending entry
+                tcs = new TaskCompletionSource<PluginWorkerInfo>(TaskCreationOptions.RunContinuationsAsynchronously);
+                _pendingStarts[workerKey] = tcs;
+            }
         }
 
+        // If another caller is starting, wait for them
+        if (waitTask != null)
+        {
+            await waitTask;
+            return new PluginInstanceInfo
+            {
+                PluginId = pluginId,
+                InstanceId = instanceId,
+                IsNew = false
+            };
+        }
+
+        // We're responsible for starting the worker
         _logger.LogInformation("Starting plugin instance: {PluginId} (instance: {InstanceId})", pluginId, instanceId);
 
-        var (manifest, pluginDir) = await FindPluginAsync(pluginId);
-
-        // Generate socket path - Host controls this
-        var socketPath = GenerateSocketPath(pluginId, instanceId);
-
-        // Ensure socket directory exists and clean up old socket
-        var socketDir = Path.GetDirectoryName(socketPath);
-        if (!string.IsNullOrEmpty(socketDir) && !Directory.Exists(socketDir))
+        try
         {
-            Directory.CreateDirectory(socketDir);
+            var (manifest, pluginDir) = await FindPluginAsync(pluginId);
+
+            // Generate socket path - Host controls this
+            var socketPath = GenerateSocketPath(pluginId, instanceId);
+
+            // Ensure socket directory exists and clean up old socket
+            var socketDir = Path.GetDirectoryName(socketPath);
+            if (!string.IsNullOrEmpty(socketDir) && !Directory.Exists(socketDir))
+            {
+                Directory.CreateDirectory(socketDir);
+            }
+            if (File.Exists(socketPath))
+            {
+                File.Delete(socketPath);
+            }
+
+            // Locate executables and assemblies
+            var pluginHostExe = FindPluginHostExecutable();
+            var assemblyPath = ResolveAssemblyPath(manifest, pluginDir);
+            var storagePath = _storageService.GetPluginStoragePath($"{pluginId}/{instanceId}");
+
+            // Start worker process with all configuration passed as arguments
+            var worker = await StartWorkerProcessAsync(
+                pluginHostExe,
+                assemblyPath,
+                socketPath,
+                pluginId,
+                instanceId,
+                storagePath);
+
+            lock (_lock)
+            {
+                _workers[workerKey] = worker;
+                _pendingStarts.Remove(workerKey);
+            }
+
+            tcs!.SetResult(worker);
+
+            return new PluginInstanceInfo
+            {
+                PluginId = pluginId,
+                InstanceId = instanceId,
+                IsNew = true
+            };
         }
-        if (File.Exists(socketPath))
+        catch (Exception ex)
         {
-            File.Delete(socketPath);
+            lock (_lock)
+            {
+                _pendingStarts.Remove(workerKey);
+            }
+            tcs!.SetException(ex);
+            throw;
         }
-
-        // Locate executables and assemblies
-        var pluginHostExe = FindPluginHostExecutable();
-        var assemblyPath = ResolveAssemblyPath(manifest, pluginDir);
-        var storagePath = _storageService.GetPluginStoragePath($"{pluginId}/{instanceId}");
-
-        // Start worker process with all configuration passed as arguments
-        var worker = await StartWorkerProcessAsync(
-            pluginHostExe,
-            assemblyPath,
-            socketPath,
-            pluginId,
-            instanceId,
-            storagePath);
-
-        lock (_lock)
-        {
-            _workers[workerKey] = worker;
-        }
-
-        return new PluginInstanceInfo
-        {
-            PluginId = pluginId,
-            InstanceId = instanceId,
-            IsNew = true
-        };
     }
 
     /// <summary>
@@ -437,6 +481,7 @@ public sealed class PluginHostManager : IDisposable
     private async Task<PluginWorkerInfo> EnsurePluginWorkerAsync(string pluginId, string instanceId)
     {
         var workerKey = GetWorkerKey(pluginId, instanceId);
+        Task<PluginWorkerInfo>? waitTask = null;
 
         lock (_lock)
         {
@@ -444,8 +489,20 @@ public sealed class PluginHostManager : IDisposable
             {
                 return existing;
             }
+
+            // Check if a start is pending - we can wait on it directly
+            if (_pendingStarts.TryGetValue(workerKey, out var pendingTcs))
+            {
+                waitTask = pendingTcs.Task;
+            }
         }
 
+        if (waitTask != null)
+        {
+            return await waitTask;
+        }
+
+        // No worker and no pending start - start one
         await StartPluginInstanceAsync(pluginId, instanceId);
 
         lock (_lock)

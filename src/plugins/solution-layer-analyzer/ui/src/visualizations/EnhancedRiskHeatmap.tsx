@@ -12,6 +12,11 @@ interface EnhancedRiskHeatmapProps {
   onCellClick?: (solution1: string, solution2: string) => void;
 }
 
+interface CellMeta {
+  rowSolution: string;
+  colSolution: string;
+}
+
 export const EnhancedRiskHeatmap: React.FC<EnhancedRiskHeatmapProps> = ({
   data,
   width = 1000,
@@ -99,50 +104,32 @@ export const EnhancedRiskHeatmap: React.FC<EnhancedRiskHeatmapProps> = ({
           return;
         }
 
+        const cellMeta: CellMeta = { rowSolution, colSolution };
         const cell = g.append('g')
+          .datum(cellMeta)
           .attr('class', 'cell')
           .attr('transform', `translate(${colIndex * cellSize},${rowIndex * cellSize})`);
 
         // Cell background
         cell.append('rect')
+          .datum(cellMeta)
           .attr('width', cellSize)
           .attr('height', cellSize)
           .attr('fill', value > 0 ? colorScale(value) : '#fff')
           .attr('stroke', '#ddd')
           .attr('stroke-width', 1)
           .style('cursor', value > 0 ? 'pointer' : 'default')
-          .on('mouseover', function(event) {
+          .on('mouseover', (event) => {
             if (value > 0) {
               setHoveredCell({ row: rowSolution, col: colSolution });
-              
-              // Update all cells for row/column highlighting
-              g.selectAll('.cell rect')
-                .attr('stroke', function(this: SVGRectElement) {
-                  const cell = d3.select(this.parentNode as SVGGElement);
-                  const transform = cell.attr('transform');
-                  const match = transform.match(/translate\((\d+),(\d+)\)/);
-                  if (!match) return '#ddd';
-                  const cellColIndex = Math.round(parseFloat(match[1]) / cellSize);
-                  const cellRowIndex = Math.round(parseFloat(match[2]) / cellSize);
-                  const cellRowSolution = solutions[cellRowIndex];
-                  const cellColSolution = solutions[cellColIndex];
-                  return cellRowSolution === rowSolution || cellColSolution === colSolution ? '#000' : '#ddd';
-                })
-                .attr('stroke-width', function(this: SVGRectElement) {
-                  const cell = d3.select(this.parentNode as SVGGElement);
-                  const transform = cell.attr('transform');
-                  const match = transform.match(/translate\((\d+),(\d+)\)/);
-                  if (!match) return 1;
-                  const cellColIndex = Math.round(parseFloat(match[1]) / cellSize);
-                  const cellRowIndex = Math.round(parseFloat(match[2]) / cellSize);
-                  const cellRowSolution = solutions[cellRowIndex];
-                  const cellColSolution = solutions[cellColIndex];
-                  return cellRowSolution === rowSolution || cellColSolution === colSolution ? 3 : 1;
-                });
-              
-              d3.select(this)
-                .attr('stroke', '#000')
-                .attr('stroke-width', 3);
+
+              g.selectAll<SVGRectElement, CellMeta>('.cell rect')
+                .attr('stroke', (meta) => (
+                  meta.rowSolution === rowSolution || meta.colSolution === colSolution ? '#000' : '#ddd'
+                ))
+                .attr('stroke-width', (meta) => (
+                  meta.rowSolution === rowSolution || meta.colSolution === colSolution ? 3 : 1
+                ));
 
               const content = `
                 <strong>${rowSolution} ↔ ${colSolution}</strong><br/>
@@ -161,15 +148,14 @@ export const EnhancedRiskHeatmap: React.FC<EnhancedRiskHeatmapProps> = ({
               showTooltip(tooltip, content, event);
             }
           })
-          .on('mouseout', function() {
+          .on('mouseout', () => {
             if (value > 0) {
               setHoveredCell(null);
-              
-              // Reset all cells
-              g.selectAll('.cell rect')
+
+              g.selectAll<SVGRectElement, CellMeta>('.cell rect')
                 .attr('stroke', '#ddd')
                 .attr('stroke-width', 1);
-                
+
               hideTooltip(tooltip);
             }
           })
@@ -231,12 +217,12 @@ export const EnhancedRiskHeatmap: React.FC<EnhancedRiskHeatmapProps> = ({
       .data(solutions)
       .join('text')
       .attr('x', 0)
-      .attr('y', (d, i) => i * cellSize + cellSize / 2)
+      .attr('y', (_, i) => i * cellSize + cellSize / 2)
       .attr('dy', '.35em')
       .attr('text-anchor', 'end')
       .attr('font-size', '11px')
       .attr('font-weight', d => hoveredCell?.row === d ? 'bold' : 'normal')
-      .attr('fill', d => hoveredCell?.row === d ? '#0078D4' : '#333')
+      .attr('fill', d => hoveredCell?.row === d ? '#0078D4' : 'lightblue')
       .text(d => d);
 
     // Column labels
@@ -247,13 +233,13 @@ export const EnhancedRiskHeatmap: React.FC<EnhancedRiskHeatmapProps> = ({
     colLabels.selectAll('text')
       .data(solutions)
       .join('text')
-      .attr('x', (d, i) => i * cellSize + cellSize / 2)
+      .attr('x', (_, i) => i * cellSize + cellSize / 2)
       .attr('y', 0)
       .attr('text-anchor', 'start')
       .attr('font-size', '11px')
       .attr('font-weight', d => hoveredCell?.col === d ? 'bold' : 'normal')
-      .attr('fill', d => hoveredCell?.col === d ? '#0078D4' : '#333')
-      .attr('transform', (d, i) => `rotate(-45, ${i * cellSize + cellSize / 2}, 0)`)
+      .attr('fill', d => hoveredCell?.col === d ? '#0078D4' : 'lightblue')
+      .attr('transform', (_, i) => `rotate(-45, ${i * cellSize + cellSize / 2}, 0)`)
       .text(d => d);
 
     // Apply initial transform

@@ -16,12 +16,14 @@ import {
 } from '@fluentui/react-components';
 import { DismissRegular, SearchRegular } from '@fluentui/react-icons';
 import { Editor } from '@monaco-editor/react';
+import { ComponentJson } from '../types';
 
 const useStyles = makeStyles({
   dialogSurface: {
     maxWidth: '900px',
     width: '90vw',
     maxHeight: '85vh',
+    zIndex: 1000,
   },
   searchBar: {
     marginBottom: tokens.spacingVerticalM,
@@ -73,7 +75,7 @@ interface LayerViewerDialogProps {
   isOpen: boolean;
   onClose: () => void;
   solutionName: string;
-  componentJson: string;
+  componentJson?: ComponentJson;
   changedAttributesJson?: string; // msdyn_changes field
 }
 
@@ -88,24 +90,18 @@ export const LayerViewerDialog: React.FC<LayerViewerDialogProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [showChangedOnly, setShowChangedOnly] = useState(true);
 
-  // Parse the component JSON to extract attributes
-  const parseAttributes = (jsonText: string): Record<string, any> => {
-    try {
-      const parsed = JSON.parse(jsonText);
-      if (!parsed.Attributes || !Array.isArray(parsed.Attributes)) {
-        return {};
-      }
-      const attrs: Record<string, any> = {};
-      parsed.Attributes.forEach((attr: any) => {
-        if (attr.Key) {
-          attrs[attr.Key] = attr.Value;
-        }
-      });
-      return attrs;
-    } catch (error) {
-      console.error('Failed to parse component JSON:', error);
+  // Extract attributes from the component JSON object
+  const parseAttributes = (json: ComponentJson | undefined): Record<string, unknown> => {
+    if (!json || !json.Attributes || !Array.isArray(json.Attributes)) {
       return {};
     }
+    const attrs: Record<string, unknown> = {};
+    json.Attributes.forEach((attr) => {
+      if (attr.Key) {
+        attrs[attr.Key] = attr.Value;
+      }
+    });
+    return attrs;
   };
 
   // Parse changed attributes from msdyn_changes

@@ -17,7 +17,6 @@ import {
   Spinner,
 } from '@fluentui/react-components';
 import { FolderOpen24Regular, CheckmarkCircle20Regular } from '@fluentui/react-icons';
-import { useAppStore } from '../store/useAppStore';
 import { usePluginApi } from '../hooks/usePluginApi';
 
 const useStyles = makeStyles({
@@ -91,7 +90,7 @@ interface LoadConfigDialogProps {
 }
 
 export const LoadConfigDialog: React.FC<LoadConfigDialogProps> = ({
-  currentConnectionId,
+  currentConnectionId = "default",
   currentIndexHash,
   onLoadIndex,
   onLoadFilter,
@@ -174,7 +173,7 @@ export const LoadConfigDialog: React.FC<LoadConfigDialogProps> = ({
                       <Text>No saved index configurations</Text>
                     </div>
                   ) : (
-                    Object.entries(indexConfigsByEnv).map(([envName, configs]) => (
+                    (Object.entries(indexConfigsByEnv) as [string, any[]][]).map(([envName, configs]) => (
                       <div key={envName}>
                         <Text size={200} weight="semibold" style={{ marginBottom: '4px' }}>
                           {envName}

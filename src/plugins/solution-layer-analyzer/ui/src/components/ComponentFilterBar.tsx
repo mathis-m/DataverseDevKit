@@ -16,7 +16,8 @@ import {
   FilterRegular,
 } from '@fluentui/react-icons';
 import { ComponentResult } from '../types';
-import { AdvancedFilterBuilder, FilterNode } from './AdvancedFilterBuilder';
+import { AdvancedFilterBuilder } from './AdvancedFilterBuilder';
+import { FilterNode } from '../types';
 
 const useStyles = makeStyles({
   filterBar: {
@@ -42,13 +43,17 @@ const useStyles = makeStyles({
 
 interface ComponentFilterBarProps {
   components: ComponentResult[];
+  availableSolutions?: string[];
   onFilterChange: (filteredComponents: ComponentResult[]) => void;
+  onAdvancedFilterChange?: (filter: FilterNode | null) => void;
   loading?: boolean;
 }
 
 export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
   components,
+  availableSolutions,
   onFilterChange,
+  onAdvancedFilterChange,
   loading,
 }) => {
   const styles = useStyles();
@@ -113,6 +118,11 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
   React.useEffect(() => {
     onFilterChange(filteredComponents);
   }, [filteredComponents, onFilterChange]);
+
+  // Notify parent when advanced filter changes (for backend query)
+  React.useEffect(() => {
+    onAdvancedFilterChange?.(advancedFilter);
+  }, [advancedFilter, onAdvancedFilterChange]);
 
   const activeFilterCount = 
     (searchText ? 1 : 0) +
@@ -209,7 +219,7 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
       {advancedMode && (
         <div style={{ marginTop: tokens.spacingVerticalM }}>
           <AdvancedFilterBuilder
-            solutions={uniqueSolutions}
+            solutions={availableSolutions || uniqueSolutions}
             onFilterChange={setAdvancedFilter}
           />
         </div>

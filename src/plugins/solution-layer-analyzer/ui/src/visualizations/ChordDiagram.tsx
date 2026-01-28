@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
-import { ChordDiagramData, ChordDetail, getSeverityColor } from '../types/analytics';
+import { ChordDiagramData, getSeverityColor } from '../types/analytics';
 import { createTooltip, showTooltip, hideTooltip } from '../utils/d3-helpers';
 import { Button } from '@fluentui/react-components';
 import { ZoomIn24Regular, ZoomOut24Regular, ArrowReset24Regular } from '@fluentui/react-icons';

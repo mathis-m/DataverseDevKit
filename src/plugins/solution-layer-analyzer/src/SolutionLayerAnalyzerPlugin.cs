@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using DataverseDevKit.Core.Abstractions;
@@ -16,16 +15,23 @@ namespace Ddk.SolutionLayerAnalyzer;
 public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 {
     private IPluginContext? _context;
-    private SqliteConnection? _keepAliveConnection;
-    private DbContextOptions<AnalyzerDbContext>? _dbContextOptions;
-    private string? _databaseName;
     private bool _disposed;
     
     /// <summary>
-    /// Semaphore to serialize database operations. SQLite in-memory shared cache 
-    /// does not handle concurrent operations well, so we serialize all DB access.
+    /// Cache of DbContextOptions per connection ID.
+    /// Each connection gets its own SQLite database file on disk.
     /// </summary>
-    private readonly SemaphoreSlim _dbLock = new(1, 1);
+    private readonly Dictionary<string, DbContextOptions<AnalyzerDbContext>> _dbOptionsCache = new();
+    
+    /// <summary>
+    /// Lock for thread-safe access to the options cache.
+    /// </summary>
+    private readonly object _cacheLock = new();
+    
+    /// <summary>
+    /// Semaphore to serialize database operations per connection.
+    /// </summary>
+    private readonly Dictionary<string, SemaphoreSlim> _dbLocks = new();
 
     /// <summary>
     /// Finalizer to ensure cleanup if DisposeAsync is not called.
@@ -45,53 +51,192 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
     public string Version => "1.0.0";
 
     /// <summary>
-    /// Creates a new DbContext instance for thread-safe database access.
-    /// Each operation should create its own DbContext to avoid concurrency issues.
+    /// Gets the database directory path.
     /// </summary>
-    private AnalyzerDbContext CreateDbContext()
+    private static string GetDatabaseDirectory()
     {
-        if (_dbContextOptions == null)
+        var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        return Path.Combine(appDataPath, "DataverseDevKit", "SolutionLayerAnalyzer");
+    }
+
+    /// <summary>
+    /// Gets or creates DbContextOptions for a specific connection ID.
+    /// </summary>
+    private DbContextOptions<AnalyzerDbContext> GetOrCreateDbOptions(string connectionId)
+    {
+        if (string.IsNullOrEmpty(connectionId))
         {
-            throw new InvalidOperationException("Plugin not initialized");
+            throw new ArgumentException("Connection ID is required", nameof(connectionId));
         }
-        return new AnalyzerDbContext(_dbContextOptions);
+
+        lock (_cacheLock)
+        {
+            if (_dbOptionsCache.TryGetValue(connectionId, out var cached))
+            {
+                return cached;
+            }
+
+            // Create database file path unique to this connection
+            var dbDirectory = GetDatabaseDirectory();
+            Directory.CreateDirectory(dbDirectory);
+            
+            // Sanitize connection ID for use in filename
+            var safeConnectionId = string.Join("_", connectionId.Split(Path.GetInvalidFileNameChars()));
+            var dbPath = Path.Combine(dbDirectory, $"analyzer_{safeConnectionId}.db");
+            var connectionString = $"Data Source={dbPath}";
+
+            var options = new DbContextOptionsBuilder<AnalyzerDbContext>()
+                .UseSqlite(connectionString)
+                .Options;
+
+            // Ensure schema exists
+            using (var initContext = new AnalyzerDbContext(options))
+            {
+                initContext.Database.EnsureCreated();
+            }
+
+            _dbOptionsCache[connectionId] = options;
+            _context?.Logger.LogInformation("Initialized database for connection {ConnectionId}: {DbPath}", connectionId, dbPath);
+
+            return options;
+        }
+    }
+
+    /// <summary>
+    /// Gets the semaphore for a specific connection ID.
+    /// </summary>
+    private SemaphoreSlim GetDbLock(string connectionId)
+    {
+        lock (_cacheLock)
+        {
+            if (!_dbLocks.TryGetValue(connectionId, out var semaphore))
+            {
+                semaphore = new SemaphoreSlim(1, 1);
+                _dbLocks[connectionId] = semaphore;
+            }
+            return semaphore;
+        }
+    }
+
+    /// <summary>
+    /// Creates a new DbContext instance for a specific connection.
+    /// </summary>
+    private AnalyzerDbContext CreateDbContext(string connectionId)
+    {
+        var options = GetOrCreateDbOptions(connectionId);
+        return new AnalyzerDbContext(options);
+    }
+
+    /// <summary>
+    /// Parses and normalizes a component JSON string into a JsonElement.
+    /// Recursively expands nested JSON strings within attribute values.
+    /// </summary>
+    /// <param name="componentJson">The raw component JSON string.</param>
+    /// <returns>The parsed and normalized JsonElement, or null if the string is null/empty or parsing fails.</returns>
+    private static JsonElement? ParseComponentJson(string? componentJson)
+    {
+        if (string.IsNullOrWhiteSpace(componentJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(componentJson);
+            var normalized = NormalizeJsonElement(doc.RootElement);
+            return JsonSerializer.SerializeToElement(normalized, JsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Recursively normalizes a JsonElement, detecting and parsing nested JSON strings.
+    /// </summary>
+    private static object? NormalizeJsonElement(JsonElement element)
+    {
+        return element.ValueKind switch
+        {
+            JsonValueKind.Object => NormalizeJsonObject(element),
+            JsonValueKind.Array => NormalizeJsonArray(element),
+            JsonValueKind.String => NormalizeJsonString(element.GetString()),
+            JsonValueKind.Number => element.TryGetInt64(out var l) ? l : element.GetDouble(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Null => null,
+            _ => element.GetRawText()
+        };
+    }
+
+    /// <summary>
+    /// Normalizes a JSON object by recursively normalizing its properties.
+    /// </summary>
+    private static Dictionary<string, object?> NormalizeJsonObject(JsonElement element)
+    {
+        var result = new Dictionary<string, object?>();
+        foreach (var property in element.EnumerateObject())
+        {
+            result[property.Name] = NormalizeJsonElement(property.Value);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Normalizes a JSON array by recursively normalizing its elements.
+    /// </summary>
+    private static List<object?> NormalizeJsonArray(JsonElement element)
+    {
+        var result = new List<object?>();
+        foreach (var item in element.EnumerateArray())
+        {
+            result.Add(NormalizeJsonElement(item));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Normalizes a string value, attempting to parse it as nested JSON if possible.
+    /// This handles double-encoded JSON strings from Dataverse componentjson.
+    /// </summary>
+    private static object? NormalizeJsonString(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+
+        var trimmed = value.Trim();
+
+        // Check if the string looks like it could be JSON (object or array)
+        if ((trimmed.StartsWith('{') && trimmed.EndsWith('}')) ||
+            (trimmed.StartsWith('[') && trimmed.EndsWith(']')))
+        {
+            try
+            {
+                using var nestedDoc = JsonDocument.Parse(trimmed);
+                // Successfully parsed as JSON - recursively normalize it
+                return NormalizeJsonElement(nestedDoc.RootElement);
+            }
+            catch (JsonException)
+            {
+                // Not valid JSON, return as string
+                return value;
+            }
+        }
+
+        return value;
     }
 
     /// <inheritdoc/>
-    public async Task InitializeAsync(IPluginContext context, CancellationToken cancellationToken = default)
+    public Task InitializeAsync(IPluginContext context, CancellationToken cancellationToken = default)
     {
         _context = context;
         _context.Logger.LogInformation("Solution Layer Analyzer plugin initialized");
-
-        // Use a unique database name per instance to avoid lock conflicts between runs
-        _databaseName = $"SolutionLayerAnalyzer_{Guid.NewGuid():N}";
-        var connectionString = $"Data Source={_databaseName};Mode=Memory;Cache=Shared";
-
-        // Create a shared connection that stays open to keep the in-memory database alive
-        _keepAliveConnection = new SqliteConnection(connectionString);
-        await _keepAliveConnection.OpenAsync(cancellationToken);
-
-        // Configure DbContext options to use the shared in-memory database
-        _dbContextOptions = new DbContextOptionsBuilder<AnalyzerDbContext>()
-            .UseSqlite(connectionString)
-            .Options;
-
-        // Create schema using a temporary context
-        using (var initContext = new AnalyzerDbContext(_dbContextOptions))
-        {
-            await initContext.Database.EnsureCreatedAsync(cancellationToken);
-        }
-
-        // Register for process exit to ensure cleanup on forced termination
-        AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
+        _context.Logger.LogInformation("Database directory: {DbDirectory}", GetDatabaseDirectory());
         
-        _context.Logger.LogInformation("In-memory database initialized: {DatabaseName}", _databaseName);
-    }
-
-    private void OnProcessExit(object? sender, EventArgs e)
-    {
-        // Synchronously dispose on process exit since we can't await
-        DisposeCore();
+        return Task.CompletedTask;
     }
 
     private void DisposeCore()
@@ -104,27 +249,15 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 
         try
         {
-            // Unregister the event handler
-            AppDomain.CurrentDomain.ProcessExit -= OnProcessExit;
-        }
-        catch
-        {
-            // Ignore errors during shutdown
-        }
-
-        try
-        {
-            _keepAliveConnection?.Dispose();
-            _keepAliveConnection = null;
-        }
-        catch
-        {
-            // Ignore errors during shutdown  
-        }
-
-        try
-        {
-            _dbLock.Dispose();
+            lock (_cacheLock)
+            {
+                foreach (var semaphore in _dbLocks.Values)
+                {
+                    semaphore.Dispose();
+                }
+                _dbLocks.Clear();
+                _dbOptionsCache.Clear();
+            }
         }
         catch
         {
@@ -165,7 +298,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             {
                 Name = "clear",
                 Label = "Clear Index",
-                Description = "Clear the in-memory index"
+                Description = "Clear the index for a specific connection"
             },
             new()
             {
@@ -199,7 +332,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
     /// <inheritdoc/>
     public async Task<JsonElement> ExecuteAsync(string commandName, string payload, CancellationToken cancellationToken = default)
     {
-        if (_context == null || _dbContextOptions == null)
+        if (_context == null)
         {
             throw new InvalidOperationException("Plugin not initialized");
         }
@@ -212,7 +345,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             "query" => await ExecuteQueryAsync(payload, cancellationToken),
             "details" => await ExecuteDetailsAsync(payload, cancellationToken),
             "diff" => await ExecuteDiffAsync(payload, cancellationToken),
-            "clear" => await ExecuteClearAsync(cancellationToken),
+            "clear" => await ExecuteClearAsync(payload, cancellationToken),
             "fetchSolutions" => await ExecuteFetchSolutionsAsync(payload, cancellationToken),
             "getComponentTypes" => await ExecuteGetComponentTypesAsync(cancellationToken),
             "getAnalytics" => await ExecuteGetAnalyticsAsync(payload, cancellationToken),
@@ -229,11 +362,6 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         var request = JsonSerializer.Deserialize<IndexRequest>(payload, JsonOptions)
             ?? throw new ArgumentException("Invalid index request payload", nameof(payload));
 
-        if (_dbContextOptions == null)
-        {
-            throw new InvalidOperationException("Plugin not initialized");
-        }
-
         _context!.Logger.LogInformation(
             "Starting indexing: {SourceCount} source solutions, {TargetCount} target solutions",
             request.SourceSolutions.Count,
@@ -241,14 +369,16 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 
         // Get ServiceClient from factory
         var serviceClient = _context.ServiceClientFactory.GetServiceClient(request.ConnectionId);
+        var dbOptions = GetOrCreateDbOptions(request.ConnectionId);
+        var dbLock = GetDbLock(request.ConnectionId);
 
         // Serialize database access to avoid SQLite concurrency issues
-        await _dbLock.WaitAsync(cancellationToken);
+        await dbLock.WaitAsync(cancellationToken);
         try
         {
             // Create indexing service with DbContextOptions
             var indexingService = new IndexingService(
-                _dbContextOptions,
+                dbOptions,
                 _context.Logger,
                 serviceClient,
                 _context);
@@ -260,7 +390,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         }
         finally
         {
-            _dbLock.Release();
+            dbLock.Release();
         }
     }
 
@@ -271,12 +401,14 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 
         _context!.Logger.LogInformation("Executing query with filters: {HasFilters}", request.Filters != null);
 
+        var dbLock = GetDbLock(request.ConnectionId);
+
         // Serialize database access to avoid SQLite concurrency issues
-        await _dbLock.WaitAsync(cancellationToken);
+        await dbLock.WaitAsync(cancellationToken);
         try
         {
             // Use QueryService with a new DbContext instance
-            await using var dbContext = CreateDbContext();
+            await using var dbContext = CreateDbContext(request.ConnectionId);
             var queryService = new QueryService(dbContext);
             var response = await queryService.QueryAsync(request, cancellationToken);
 
@@ -284,7 +416,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         }
         finally
         {
-            _dbLock.Release();
+            dbLock.Release();
         }
     }
 
@@ -295,11 +427,13 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 
         _context!.Logger.LogInformation("Getting details for component: {ComponentId}", request.ComponentId);
 
+        var dbLock = GetDbLock(request.ConnectionId);
+
         // Serialize database access to avoid SQLite concurrency issues
-        await _dbLock.WaitAsync(cancellationToken);
+        await dbLock.WaitAsync(cancellationToken);
         try
         {
-            await using var dbContext = CreateDbContext();
+            await using var dbContext = CreateDbContext(request.ConnectionId);
             var component = await dbContext.Components
                 .Include(c => c.Layers)
                 .FirstOrDefaultAsync(c => c.ComponentId == request.ComponentId, cancellationToken);
@@ -321,7 +455,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
                         Version = l.Version,
                         CreatedOn = l.CreatedOn,
                         Ordinal = l.Ordinal,
-                        ComponentJson = l.ComponentJson,
+                        ComponentJson = ParseComponentJson(l.ComponentJson),
                         Changes = null // msdyn_changes would need to be retrieved separately if needed
                     })
                     .ToList()
@@ -331,7 +465,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         }
         finally
         {
-            _dbLock.Release();
+            dbLock.Release();
         }
     }
 
@@ -346,12 +480,15 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             request.Left.SolutionName,
             request.Right.SolutionName);
 
+        var connectionId = request.ConnectionId ?? string.Empty;
+        var dbLock = GetDbLock(connectionId);
+
         // Get component data within lock, then release for network calls
         Models.Component component;
-        await _dbLock.WaitAsync(cancellationToken);
+        await dbLock.WaitAsync(cancellationToken);
         try
         {
-            await using var dbContext = CreateDbContext();
+            await using var dbContext = CreateDbContext(connectionId);
             var found = await dbContext.Components
                 .Include(c => c.Layers)
                 .FirstOrDefaultAsync(c => c.ComponentId == request.ComponentId, cancellationToken);
@@ -364,7 +501,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         }
         finally
         {
-            _dbLock.Release();
+            dbLock.Release();
         }
 
         // Get ServiceClient for payload retrieval (outside lock for long-running network calls)
@@ -418,16 +555,24 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         return JsonSerializer.SerializeToElement(response, JsonOptions);
     }
 
-    private async Task<JsonElement> ExecuteClearAsync(CancellationToken cancellationToken)
+    private async Task<JsonElement> ExecuteClearAsync(string payload, CancellationToken cancellationToken)
     {
-        _context!.Logger.LogInformation("Clearing index");
+        // Parse connection ID from payload
+        var request = JsonSerializer.Deserialize<JsonElement>(payload);
+        var connectionId = request.TryGetProperty("connectionId", out var connIdProp) 
+            ? connIdProp.GetString() ?? string.Empty 
+            : string.Empty;
+
+        _context!.Logger.LogInformation("Clearing index for connection: {ConnectionId}", connectionId);
+
+        var dbLock = GetDbLock(connectionId);
 
         // Serialize database access to avoid SQLite concurrency issues
-        await _dbLock.WaitAsync(cancellationToken);
+        await dbLock.WaitAsync(cancellationToken);
         try
         {
             // Clear all tables using a new DbContext instance
-            await using var dbContext = CreateDbContext();
+            await using var dbContext = CreateDbContext(connectionId);
             dbContext.Artifacts.RemoveRange(dbContext.Artifacts);
             dbContext.Layers.RemoveRange(dbContext.Layers);
             dbContext.Components.RemoveRange(dbContext.Components);
@@ -440,7 +585,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         }
         finally
         {
-            _dbLock.Release();
+            dbLock.Release();
         }
     }
 
@@ -451,10 +596,12 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 
         _context!.Logger.LogInformation("Saving index config: {Name}", request.Name);
 
-        await _dbLock.WaitAsync(cancellationToken);
+        var dbLock = GetDbLock(request.ConnectionId);
+
+        await dbLock.WaitAsync(cancellationToken);
         try
         {
-            await using var dbContext = CreateDbContext();
+            await using var dbContext = CreateDbContext(request.ConnectionId);
             var configService = new ConfigService(dbContext, _context.Logger);
             var response = await configService.SaveIndexConfigAsync(request, cancellationToken);
 
@@ -462,7 +609,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         }
         finally
         {
-            _dbLock.Release();
+            dbLock.Release();
         }
     }
 
@@ -473,10 +620,13 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 
         _context!.Logger.LogInformation("Loading index configs");
 
-        await _dbLock.WaitAsync(cancellationToken);
+        var connectionId = request.ConnectionId ?? string.Empty;
+        var dbLock = GetDbLock(connectionId);
+
+        await dbLock.WaitAsync(cancellationToken);
         try
         {
-            await using var dbContext = CreateDbContext();
+            await using var dbContext = CreateDbContext(connectionId);
             var configService = new ConfigService(dbContext, _context.Logger);
             var response = await configService.LoadIndexConfigsAsync(request, cancellationToken);
 
@@ -484,7 +634,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         }
         finally
         {
-            _dbLock.Release();
+            dbLock.Release();
         }
     }
 
@@ -495,10 +645,13 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 
         _context!.Logger.LogInformation("Saving filter config: {Name}", request.Name);
 
-        await _dbLock.WaitAsync(cancellationToken);
+        var connectionId = request.ConnectionId ?? string.Empty;
+        var dbLock = GetDbLock(connectionId);
+
+        await dbLock.WaitAsync(cancellationToken);
         try
         {
-            await using var dbContext = CreateDbContext();
+            await using var dbContext = CreateDbContext(connectionId);
             var configService = new ConfigService(dbContext, _context.Logger);
             var response = await configService.SaveFilterConfigAsync(request, cancellationToken);
 
@@ -506,7 +659,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         }
         finally
         {
-            _dbLock.Release();
+            dbLock.Release();
         }
     }
 
@@ -517,10 +670,13 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 
         _context!.Logger.LogInformation("Loading filter configs");
 
-        await _dbLock.WaitAsync(cancellationToken);
+        var connectionId = request.ConnectionId ?? string.Empty;
+        var dbLock = GetDbLock(connectionId);
+
+        await dbLock.WaitAsync(cancellationToken);
         try
         {
-            await using var dbContext = CreateDbContext();
+            await using var dbContext = CreateDbContext(connectionId);
             var configService = new ConfigService(dbContext, _context.Logger);
             var response = await configService.LoadFilterConfigsAsync(request, cancellationToken);
 
@@ -528,7 +684,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         }
         finally
         {
-            _dbLock.Release();
+            dbLock.Release();
         }
     }
 
@@ -543,13 +699,8 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 
         var query = new Microsoft.Xrm.Sdk.Query.QueryExpression("solution")
         {
-            ColumnSet = new Microsoft.Xrm.Sdk.Query.ColumnSet("uniquename", "friendlyname", "version", "ismanaged", "publisherid"),
-            Criteria = new Microsoft.Xrm.Sdk.Query.FilterExpression(Microsoft.Xrm.Sdk.Query.LogicalOperator.And)
+            ColumnSet = new Microsoft.Xrm.Sdk.Query.ColumnSet("uniquename", "friendlyname", "version", "ismanaged", "publisherid")
         };
-        
-        // Exclude default/internal solutions
-        query.Criteria.AddCondition("isvisible", Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal, true);
-        query.Criteria.AddCondition("ismanaged", Microsoft.Xrm.Sdk.Query.ConditionOperator.In, true, false);
 
         var results = await Task.Run(() => serviceClient.RetrieveMultiple(query), cancellationToken);
 
@@ -621,11 +772,14 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 
         _context!.Logger.LogInformation("Computing analytics");
 
+        var connectionId = request.ConnectionId ?? string.Empty;
+        var dbLock = GetDbLock(connectionId);
+
         // Serialize database access
-        await _dbLock.WaitAsync(cancellationToken);
+        await dbLock.WaitAsync(cancellationToken);
         try
         {
-            using var dbContext = CreateDbContext();
+            using var dbContext = CreateDbContext(connectionId);
             
             var analyticsService = new AnalyticsService(_context.Logger);
             var analytics = await analyticsService.ComputeAnalyticsAsync(dbContext, cancellationToken);
@@ -640,7 +794,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         }
         finally
         {
-            _dbLock.Release();
+            dbLock.Release();
         }
     }
 

@@ -413,7 +413,7 @@ export const DiffTab: React.FC<DiffTabProps> = ({
               </Card>
             ) : (
               <div className={styles.attributesList}>
-                {filteredDiffs.map((diff, index) => (
+                {filteredDiffs.map((diff) => (
                   <div key={diff.key} className={styles.attributeItem}>
                     <div className={styles.attributeHeader}>
                       <Text weight="semibold" size={300}>{diff.key}</Text>

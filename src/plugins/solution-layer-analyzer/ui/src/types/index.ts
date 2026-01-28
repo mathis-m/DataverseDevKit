@@ -9,6 +9,17 @@ export interface ComponentResult {
   tableLogicalName?: string;
 }
 
+export interface ComponentJsonAttributes {
+  Key: string;
+  Value: unknown;
+}
+
+export interface ComponentJson {
+  Attributes?: ComponentJsonAttributes[];
+  Id?: string;
+  SchemaName?: string;
+}
+
 export interface Layer {
   solutionName: string;
   publisher?: string;
@@ -16,7 +27,7 @@ export interface Layer {
   version?: string;
   ordinal: number;
   createdOn?: string;
-  componentJson?: string; // Full entity attributes from msdyn_componentjson
+  componentJson?: ComponentJson; // Full entity attributes from msdyn_componentjson
   changes?: string; // Changed attributes from msdyn_changes
 }
 
@@ -27,6 +38,15 @@ export interface IndexStats {
     layers: number;
   };
   warnings?: string[];
+}
+
+export interface FilterNode {
+  type: string;
+  id: string;
+  solution?: string;
+  solutions?: string[];
+  sequence?: (string | string[])[];
+  children?: FilterNode[];
 }
 
 export interface IndexResponse {

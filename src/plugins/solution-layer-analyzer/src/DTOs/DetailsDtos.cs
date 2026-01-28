@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Ddk.SolutionLayerAnalyzer.DTOs;
 
 /// <summary>
@@ -5,6 +7,11 @@ namespace Ddk.SolutionLayerAnalyzer.DTOs;
 /// </summary>
 public sealed record DetailsRequest
 {
+    /// <summary>
+    /// Gets the connection ID for identifying the database.
+    /// </summary>
+    public string ConnectionId { get; init; } = string.Empty;
+
     /// <summary>
     /// Gets the component ID.
     /// </summary>
@@ -61,7 +68,7 @@ public sealed record LayerDetail
     /// Gets the component JSON from msdyn_componentjson field.
     /// Contains the full entity attributes for this layer.
     /// </summary>
-    public string? ComponentJson { get; init; }
+    public JsonElement? ComponentJson { get; init; }
 
     /// <summary>
     /// Gets the changed attributes from msdyn_changes field.

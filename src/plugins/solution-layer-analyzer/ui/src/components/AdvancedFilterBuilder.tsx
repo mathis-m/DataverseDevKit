@@ -7,16 +7,14 @@ import {
   CardHeader,
   Dropdown,
   Option,
-  Input,
   Label,
   Text,
   Tooltip,
+  Tag,
+  TagGroup,
 } from '@fluentui/react-components';
-import {
-  AddRegular,
-  DeleteRegular,
-  InfoRegular,
-} from '@fluentui/react-icons';
+import { DeleteRegular, InfoRegular, AddRegular, DismissRegular, ArrowUpRegular } from '@fluentui/react-icons';
+import { FilterNode } from '../types';
 
 const useStyles = makeStyles({
   container: {
@@ -46,6 +44,7 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
+    flexWrap: 'wrap',
   },
   badge: {
     padding: `${tokens.spacingVerticalXXS} ${tokens.spacingHorizontalS}`,
@@ -54,16 +53,49 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusSmall,
     fontSize: tokens.fontSizeBase200,
   },
+  addFilterRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  sequenceContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+  },
+  sequenceStep: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    padding: tokens.spacingVerticalS,
+    backgroundColor: tokens.colorNeutralBackground3,
+    borderRadius: tokens.borderRadiusSmall,
+    border: `1px dashed ${tokens.colorNeutralStroke2}`,
+  },
+  sequenceStepHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  sequenceStepContent: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    flexWrap: 'wrap',
+  },
+  solutionTag: {
+    display: 'flex',
+    alignItems: 'center',
+  },
+  addLayerButton: {
+    marginTop: tokens.spacingVerticalXS,
+  },
+  stepNumber: {
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorBrandForeground1,
+    minWidth: '20px',
+  },
 });
-
-export interface FilterNode {
-  type: string;
-  id: string;
-  solution?: string;
-  solutions?: string[];
-  sequence?: (string | string[])[];
-  children?: FilterNode[];
-}
 
 interface AdvancedFilterBuilderProps {
   solutions: string[];
@@ -82,6 +114,9 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
     children: [],
   });
 
+  // Track selected filter type for each node that can have children
+  const [selectedFilterTypes, setSelectedFilterTypes] = useState<Record<string, string>>({});
+
   const updateFilter = (updatedFilter: FilterNode) => {
     setRootFilter(updatedFilter);
     onFilterChange(updatedFilter.children && updatedFilter.children.length > 0 ? updatedFilter : null);
@@ -95,8 +130,8 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
       ...(childType === 'HAS_ANY' && { solutions: [] }),
       ...(childType === 'HAS_ALL' && { solutions: [] }),
       ...(childType === 'HAS_NONE' && { solutions: [] }),
-      ...(childType === 'ORDER_STRICT' && { sequence: [] }),
-      ...(childType === 'ORDER_FLEX' && { sequence: [] }),
+      ...(childType === 'ORDER_STRICT' && { sequence: [[]] }),
+      ...(childType === 'ORDER_FLEX' && { sequence: [[]] }),
       ...(['AND', 'OR', 'NOT'].includes(childType) && { children: [] }),
     };
 
@@ -117,6 +152,8 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
     };
 
     updateFilter(addToNode(rootFilter));
+    // Clear the selected filter type after adding
+    setSelectedFilterTypes(prev => ({ ...prev, [parentId]: '' }));
   };
 
   const removeChild = (nodeId: string) => {
@@ -155,8 +192,163 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
     updateFilter(updateNode(rootFilter));
   };
 
+  // Helper functions for ORDER sequence manipulation
+  const addSolutionToSequenceStep = (nodeId: string, stepIndex: number, solution: string) => {
+    const updateNode = (node: FilterNode): FilterNode => {
+      if (node.id === nodeId && node.sequence) {
+        const newSequence = [...node.sequence];
+        if (Array.isArray(newSequence[stepIndex])) {
+          if (!newSequence[stepIndex].includes(solution)) {
+            newSequence[stepIndex] = [...newSequence[stepIndex], solution];
+          }
+        } else {
+          // Convert single solution to array if needed
+          const existing = newSequence[stepIndex];
+          newSequence[stepIndex] = existing ? [existing, solution] : [solution];
+        }
+        return { ...node, sequence: newSequence };
+      }
+      if (node.children) {
+        return { ...node, children: node.children.map(child => updateNode(child)) };
+      }
+      return node;
+    };
+    updateFilter(updateNode(rootFilter));
+  };
+
+  const removeSolutionFromSequenceStep = (nodeId: string, stepIndex: number, solution: string) => {
+    const updateNode = (node: FilterNode): FilterNode => {
+      if (node.id === nodeId && node.sequence) {
+        const newSequence = [...node.sequence];
+        if (Array.isArray(newSequence[stepIndex])) {
+          newSequence[stepIndex] = newSequence[stepIndex].filter((s: string) => s !== solution);
+        }
+        return { ...node, sequence: newSequence };
+      }
+      if (node.children) {
+        return { ...node, children: node.children.map(child => updateNode(child)) };
+      }
+      return node;
+    };
+    updateFilter(updateNode(rootFilter));
+  };
+
+  const addSequenceStep = (nodeId: string) => {
+    const updateNode = (node: FilterNode): FilterNode => {
+      if (node.id === nodeId && node.sequence) {
+        return { ...node, sequence: [...node.sequence, []] };
+      }
+      if (node.children) {
+        return { ...node, children: node.children.map(child => updateNode(child)) };
+      }
+      return node;
+    };
+    updateFilter(updateNode(rootFilter));
+  };
+
+  const removeSequenceStep = (nodeId: string, stepIndex: number) => {
+    const updateNode = (node: FilterNode): FilterNode => {
+      if (node.id === nodeId && node.sequence) {
+        const newSequence = node.sequence.filter((_: any, i: number) => i !== stepIndex);
+        return { ...node, sequence: newSequence.length > 0 ? newSequence : [[]] };
+      }
+      if (node.children) {
+        return { ...node, children: node.children.map(child => updateNode(child)) };
+      }
+      return node;
+    };
+    updateFilter(updateNode(rootFilter));
+  };
+
+  const renderOrderSequence = (node: FilterNode): React.ReactNode => {
+    const sequence = node.sequence || [[]];
+    const isStrict = node.type === 'ORDER_STRICT';
+
+    return (
+      <div className={styles.sequenceContainer}>
+        <Text size={200}>
+          {isStrict 
+            ? 'Layers must appear in exact order (strict sequence)' 
+            : 'Layers must appear in order but may have other layers between (flexible sequence)'}
+        </Text>
+        
+        {sequence.map((step: string | string[], stepIndex: number) => {
+          const stepSolutions = Array.isArray(step) ? step : (step ? [step] : []);
+          const availableSolutions = solutions.filter(s => !stepSolutions.includes(s));
+          
+          return (
+            <div key={stepIndex} className={styles.sequenceStep}>
+              <div className={styles.sequenceStepHeader}>
+                <span className={styles.stepNumber}>{stepIndex + 1}.</span>
+                <Text size={200}>
+                  {stepIndex === 0 ? 'Must include layer(s)' : 'Have layer(s) on-top'}
+                </Text>
+                {sequence.length > 1 && (
+                  <Button
+                    appearance="subtle"
+                    icon={<DeleteRegular />}
+                    size="small"
+                    onClick={() => removeSequenceStep(node.id, stepIndex)}
+                    title="Remove this layer requirement"
+                  />
+                )}
+              </div>
+              
+              <div className={styles.sequenceStepContent}>
+                {stepSolutions.length > 0 && (
+                  <TagGroup>
+                    {stepSolutions.map((sol: string) => (
+                      <Tag
+                        key={sol}
+                        dismissible
+                        dismissIcon={<DismissRegular />}
+                        value={sol}
+                        onClick={() => removeSolutionFromSequenceStep(node.id, stepIndex, sol)}
+                      >
+                        {sol}
+                      </Tag>
+                    ))}
+                  </TagGroup>
+                )}
+                
+                {availableSolutions.length > 0 && (
+                  <Dropdown
+                    placeholder={stepSolutions.length > 0 ? 'Add additional...' : 'Select solution...'}
+                    onOptionSelect={(_, data) => {
+                      if (data.optionValue) {
+                        addSolutionToSequenceStep(node.id, stepIndex, data.optionValue);
+                      }
+                    }}
+                    size="small"
+                    selectedOptions={[]}
+                    value=""
+                  >
+                    {availableSolutions.map(sol => (
+                      <Option key={sol} value={sol}>{sol}</Option>
+                    ))}
+                  </Dropdown>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        
+        <Button
+          appearance="subtle"
+          icon={<ArrowUpRegular />}
+          size="small"
+          onClick={() => addSequenceStep(node.id)}
+          className={styles.addLayerButton}
+        >
+          Add layer filter on top
+        </Button>
+      </div>
+    );
+  };
+
   const renderNode = (node: FilterNode, depth: number = 0): React.ReactNode => {
     const canDelete = node.id !== 'root';
+    const selectedType = selectedFilterTypes[node.id] || '';
 
     return (
       <div key={node.id} className={styles.filterNode} style={{ marginLeft: depth * 20 }}>
@@ -185,13 +377,16 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
           {/* Logical operators with children */}
           {['AND', 'OR', 'NOT'].includes(node.type) && (
             <>
-              <div className={styles.inline}>
+              <div className={styles.addFilterRow}>
                 <Dropdown
-                  placeholder="Add filter..."
+                  placeholder="Select filter type..."
+                  selectedOptions={selectedType ? [selectedType] : []}
+                  value={selectedType}
                   onOptionSelect={(_, data) => {
-                    if (data.optionValue) {
-                      addChild(node.id, data.optionValue);
-                    }
+                    setSelectedFilterTypes(prev => ({ 
+                      ...prev, 
+                      [node.id]: data.optionValue || '' 
+                    }));
                   }}
                   size="small"
                 >
@@ -205,6 +400,19 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
                   <Option value="OR">OR</Option>
                   <Option value="NOT">NOT</Option>
                 </Dropdown>
+                <Button
+                  appearance="primary"
+                  icon={<AddRegular />}
+                  size="small"
+                  disabled={!selectedType}
+                  onClick={() => {
+                    if (selectedType) {
+                      addChild(node.id, selectedType);
+                    }
+                  }}
+                >
+                  Add
+                </Button>
               </div>
 
               {node.children && node.children.length > 0 && (
@@ -244,7 +452,6 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
                 multiselect
                 selectedOptions={node.solutions || []}
                 onOptionSelect={(_, data) => {
-                  const current = node.solutions || [];
                   const updated = data.selectedOptions;
                   updateNodeProperty(node.id, 'solutions', updated);
                 }}
@@ -259,29 +466,7 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
           )}
 
           {/* ORDER_STRICT, ORDER_FLEX filters */}
-          {['ORDER_STRICT', 'ORDER_FLEX'].includes(node.type) && (
-            <div>
-              <Label size="small">
-                Sequence (comma-separated, use [] for choice groups):
-              </Label>
-              <Input
-                size="small"
-                placeholder="e.g., CoreSolution,[ProjectA,ProjectB],ProjectC"
-                value={node.sequence ? JSON.stringify(node.sequence) : ''}
-                onChange={(_, data) => {
-                  try {
-                    const parsed = JSON.parse(data.value);
-                    updateNodeProperty(node.id, 'sequence', parsed);
-                  } catch {
-                    // Invalid JSON, ignore
-                  }
-                }}
-              />
-              <Text size={100}>
-                Example: ["Core", ["ProjA", "ProjB"], "Final"] means Core, then any of ProjA/ProjB, then Final
-              </Text>
-            </div>
-          )}
+          {['ORDER_STRICT', 'ORDER_FLEX'].includes(node.type) && renderOrderSequence(node)}
         </div>
       </div>
     );

@@ -22,6 +22,7 @@ public class IndexingService
     private readonly ILogger _logger;
     private readonly ServiceClient _serviceClient;
     private readonly IPluginContext _pluginContext;
+    private readonly ComponentNameResolver _nameResolver;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -38,6 +39,7 @@ public class IndexingService
         _logger = logger;
         _serviceClient = serviceClient;
         _pluginContext = pluginContext;
+        _nameResolver = new ComponentNameResolver(dbContextOptions, logger, serviceClient);
     }
 
     public async Task<IndexResponse> StartIndexAsync(IndexRequest request, CancellationToken cancellationToken)
@@ -103,6 +105,7 @@ public class IndexingService
             await EmitProgressAsync(operationId, "components", 0, "Discovering components...");
             
             var components = await DiscoverComponentsAsync(
+                operationId,
                 solutions.Where(s => s.IsTarget).ToList(),
                 request.IncludeComponentTypes,
                 CancellationToken.None);
@@ -113,7 +116,7 @@ public class IndexingService
             // Phase 3: Build layer stacks for each component
             await EmitProgressAsync(operationId, "layers", 0, "Building layer stacks...");
             
-            var layerCount = await BuildLayerStacksAsync(components, CancellationToken.None);
+            var layerCount = await BuildLayerStacksAsync(operationId, components, CancellationToken.None);
             
             stats = stats with { Layers = layerCount };
             await EmitProgressAsync(operationId, "layers", 100, $"Built {layerCount} layers");
@@ -262,6 +265,7 @@ public class IndexingService
     }
 
     private async Task<List<Component>> DiscoverComponentsAsync(
+        Guid operationId,
         List<Solution> targetSolutions,
         List<string> componentTypes,
         CancellationToken cancellationToken)
@@ -323,8 +327,9 @@ public class IndexingService
                             ObjectId = objectId,
                             ComponentType = componentTypeName,
                             ComponentTypeCode = componentTypeCode,
-                            LogicalName = $"component_{objectId:N}",
-                            DisplayName = $"Component {componentTypeName}"
+                            // Placeholder values - will be resolved after collecting all components
+                            LogicalName = objectId.ToString(),
+                            DisplayName = $"{componentTypeName}"
                         };
 
                         components.Add(component);
@@ -345,6 +350,39 @@ public class IndexingService
                 _logger.LogInformation("Processed {Total} solution components for {Solution}", totalProcessed, solution.UniqueName);
             }
 
+            // Phase: Resolve component names
+            await EmitProgressAsync(operationId, "names", 0, "Resolving component names...");
+            var totalToResolve = components.Count;
+            var resolved = 0;
+
+            foreach (var component in components)
+            {
+                try
+                {
+                    var nameInfo = await _nameResolver.ResolveAsync(
+                        component.ObjectId,
+                        component.ComponentTypeCode,
+                        cancellationToken);
+
+                    component.LogicalName = nameInfo.LogicalName;
+                    component.DisplayName = nameInfo.DisplayName;
+                    component.TableLogicalName = nameInfo.TableLogicalName;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to resolve name for component {ObjectId}", component.ObjectId);
+                    // Keep the fallback values
+                }
+
+                resolved++;
+                if (resolved % 50 == 0 || resolved == totalToResolve)
+                {
+                    var percent = totalToResolve > 0 ? resolved * 100 / totalToResolve : 100;
+                    await EmitProgressAsync(operationId, "names", percent, 
+                        $"Resolved {resolved}/{totalToResolve} component names");
+                }
+            }
+
             // Save all components in a single batch
             await using (var dbContext = new AnalyzerDbContext(_dbContextOptions))
             {
@@ -363,12 +401,15 @@ public class IndexingService
     }
 
     private async Task<int> BuildLayerStacksAsync(
+        Guid operationId,
         List<Component> components,
         CancellationToken cancellationToken)
     {
         var layerCount = 0;
         var allLayers = new List<Layer>();
         Dictionary<string, Solution> solutionCache;
+        var totalComponents = components.Count;
+        var processedComponents = 0;
 
         // Load all solutions into cache to avoid repeated database queries
         await using (var dbContext = new AnalyzerDbContext(_dbContextOptions))
@@ -381,6 +422,11 @@ public class IndexingService
             foreach (var component in components)
             {
                 var componentTypeName = GetDataverseComponentTypeName(component.ComponentType);
+                
+                // Emit granular progress for each component
+                var percent = totalComponents > 0 ? processedComponents * 100 / totalComponents : 0;
+                await EmitProgressAsync(operationId, "layers", percent, 
+                    $"Processing component {processedComponents + 1}/{totalComponents}: {component.ComponentType} ({component.ObjectId})");
                 
                 // Query msdyn_componentlayer for this component
                 var query = new QueryExpression("msdyn_componentlayer")
@@ -466,7 +512,10 @@ public class IndexingService
                 catch (Exception ex)
                 {
                     _logger.LogDebug(ex, "No layers found for component {ComponentId}", component.ComponentId);
-                    continue;
+                }
+                finally
+                {
+                    processedComponents++;
                 }
             }
 

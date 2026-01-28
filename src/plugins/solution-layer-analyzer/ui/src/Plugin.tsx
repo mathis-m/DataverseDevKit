@@ -14,7 +14,6 @@ import {
   CodeRegular,
   ChartPerson24Regular,
 } from '@fluentui/react-icons';
-import { IndexTab } from './components/IndexTab';
 import { ImprovedIndexTab } from './components/ImprovedIndexTab';
 import { AnalysisTab } from './components/AnalysisTab';
 import { DiffTab } from './components/DiffTab';
@@ -25,6 +24,7 @@ import { SaveConfigDialog } from './components/SaveConfigDialog';
 import { LoadConfigDialog } from './components/LoadConfigDialog';
 import { IndexStats } from './types';
 import { useAppStore } from './store/useAppStore';
+import { usePluginApi } from './hooks/usePluginApi';
 import { hostBridge } from '@ddk/host-sdk';
 
 const useStyles = makeStyles({
@@ -74,7 +74,34 @@ const Plugin: React.FC<PluginProps> = ({ instanceId }) => {
   const [indexStats, setIndexStats] = useState<IndexStats | null>(null);
   
   // Diff navigation state - now from store
-  const { diffState, setDiffState, indexConfig, addOperation, updateOperation, removeOperation } = useAppStore();
+  const { 
+    diffState, setDiffState, indexConfig, 
+    addOperation, updateOperation, removeOperation,
+    setAvailableSolutions, setAvailableComponentTypes, setMetadataLoaded, metadataLoaded
+  } = useAppStore();
+  
+  const { fetchSolutions, getComponentTypes } = usePluginApi();
+
+  // Load global metadata (solutions and component types) once on mount
+  useEffect(() => {
+    if (metadataLoaded) return;
+    
+    const loadMetadata = async () => {
+      try {
+        const [solutionsData, typesData] = await Promise.all([
+          fetchSolutions('default'),
+          getComponentTypes()
+        ]);
+        setAvailableSolutions(solutionsData.solutions || []);
+        setAvailableComponentTypes(typesData.componentTypes || []);
+        setMetadataLoaded(true);
+      } catch (error) {
+        console.error('Failed to load metadata:', error);
+      }
+    };
+    
+    loadMetadata();
+  }, [metadataLoaded, fetchSolutions, getComponentTypes, setAvailableSolutions, setAvailableComponentTypes, setMetadataLoaded]);
 
   // Listen for progress events
   useEffect(() => {

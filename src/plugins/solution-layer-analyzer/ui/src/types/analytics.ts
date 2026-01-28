@@ -24,7 +24,7 @@ export interface DetailedOverlap {
   unmanagedOverlap: number;
   componentTypeBreakdown: Record<string, number>;
   componentIds: string[];
-  severity: 'low' | 'normal' | 'high' | 'critical';
+  severity: SeverityLevel;
 }
 
 export interface ComponentRiskSummary {
@@ -133,12 +133,13 @@ export interface FilterState {
 }
 
 // Utility types
-export type SeverityLevel = 'low' | 'medium' | 'high' | 'critical';
+export type SeverityLevel = 'low' | 'normal' | 'medium' | 'high' | 'critical';
 export type ViolationType = 'unmanaged_override' | 'excessive_depth' | 'forbidden_layer';
 
 // Color scales
 export const SEVERITY_COLORS: Record<SeverityLevel, string> = {
   low: '#2E7D32',      // Green
+  normal: '#4F6BED',   // Indigo
   medium: '#F57C00',   // Orange
   high: '#D32F2F',     // Red
   critical: '#B71C1C', // Dark Red

@@ -14,7 +14,6 @@ import {
   InfoLabel,
   Combobox,
   Option,
-  Tag,
   TagGroup,
   InteractionTag,
   InteractionTagPrimary,
@@ -22,6 +21,7 @@ import {
 } from '@fluentui/react-components';
 import { PlayRegular, ArrowSyncRegular, CheckmarkCircleRegular, DismissCircleRegular, DismissRegular } from '@fluentui/react-icons';
 import { usePluginApi } from '../hooks/usePluginApi';
+import { useAppStore } from '../store/useAppStore';
 import { IndexStats } from '../types';
 
 const useStyles = makeStyles({
@@ -46,20 +46,6 @@ const useStyles = makeStyles({
   },
 });
 
-interface Solution {
-  uniqueName: string;
-  displayName: string;
-  version: string;
-  isManaged: boolean;
-  publisher?: string;
-}
-
-interface ComponentType {
-  name: string;
-  displayName: string;
-  typeCode: number;
-}
-
 interface IndexTabProps {
   onIndexComplete: (stats: IndexStats) => void;
 }
@@ -68,10 +54,8 @@ export const ImprovedIndexTab: React.FC<IndexTabProps> = ({ onIndexComplete }) =
   const styles = useStyles();
   const { indexSolutions, clearIndex, loading, indexCompletion } = usePluginApi();
   
-  const [allSolutions, setAllSolutions] = useState<Solution[]>([]);
-  const [allComponentTypes, setAllComponentTypes] = useState<ComponentType[]>([]);
-  const [loadingSolutions, setLoadingSolutions] = useState(false);
-  const [loadingComponentTypes, setLoadingComponentTypes] = useState(false);
+  // Get solutions and component types from global store
+  const { availableSolutions, availableComponentTypes, metadataLoaded } = useAppStore();
   
   const [selectedSourceSolutions, setSelectedSourceSolutions] = useState<string[]>([]);
   const [selectedTargetSolutions, setSelectedTargetSolutions] = useState<string[]>([]);
@@ -80,18 +64,12 @@ export const ImprovedIndexTab: React.FC<IndexTabProps> = ({ onIndexComplete }) =
   const [operationId, setOperationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Load solutions and component types on mount
-  useEffect(() => {
-    loadSolutions();
-    loadComponentTypes();
-  }, []);
-
   // Set all component types as selected by default once loaded
   useEffect(() => {
-    if (allComponentTypes.length > 0 && selectedComponentTypes.length === 0) {
-      setSelectedComponentTypes(allComponentTypes.map(ct => ct.name));
+    if (availableComponentTypes.length > 0 && selectedComponentTypes.length === 0) {
+      setSelectedComponentTypes(availableComponentTypes.map(ct => ct.name));
     }
-  }, [allComponentTypes]);
+  }, [availableComponentTypes, selectedComponentTypes.length]);
 
   // Handle index completion events
   useEffect(() => {
@@ -110,54 +88,6 @@ export const ImprovedIndexTab: React.FC<IndexTabProps> = ({ onIndexComplete }) =
       }
     }
   }, [indexCompletion, onIndexComplete]);
-
-  const loadSolutions = async () => {
-    setLoadingSolutions(true);
-    try {
-      const response = await fetch('/api/plugins/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pluginId: 'com.ddk.solutionlayeranalyzer',
-          command: 'fetchSolutions',
-          payload: JSON.stringify({ connectionId: 'default' }),
-        }),
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setAllSolutions(data.solutions || []);
-      }
-    } catch (err) {
-      console.error('Failed to load solutions:', err);
-    } finally {
-      setLoadingSolutions(false);
-    }
-  };
-
-  const loadComponentTypes = async () => {
-    setLoadingComponentTypes(true);
-    try {
-      const response = await fetch('/api/plugins/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pluginId: 'com.ddk.solutionlayeranalyzer',
-          command: 'getComponentTypes',
-          payload: JSON.stringify({}),
-        }),
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setAllComponentTypes(data.componentTypes || []);
-      }
-    } catch (err) {
-      console.error('Failed to load component types:', err);
-    } finally {
-      setLoadingComponentTypes(false);
-    }
-  };
 
   const handleIndex = async () => {
     setError(null);
@@ -197,14 +127,12 @@ export const ImprovedIndexTab: React.FC<IndexTabProps> = ({ onIndexComplete }) =
   };
 
   const getSolutionDisplay = (uniqueName: string) => {
-    const solution = allSolutions.find(s => s.uniqueName === uniqueName);
+    const solution = availableSolutions.find(s => s.uniqueName === uniqueName);
     return solution ? `${solution.displayName} (${uniqueName})` : uniqueName;
   };
 
-  const getComponentTypeDisplay = (name: string) => {
-    const type = allComponentTypes.find(ct => ct.name === name);
-    return type ? type.displayName : name;
-  };
+  const isIndexing = !!loading?.indexing;
+  const isBusy = isIndexing || !metadataLoaded;
 
   return (
     <Card>
@@ -229,7 +157,7 @@ export const ImprovedIndexTab: React.FC<IndexTabProps> = ({ onIndexComplete }) =
           hint="Solutions where components originate"
           required
         >
-          {loadingSolutions ? (
+          {!metadataLoaded ? (
             <Spinner size="tiny" />
           ) : (
             <>
@@ -241,7 +169,7 @@ export const ImprovedIndexTab: React.FC<IndexTabProps> = ({ onIndexComplete }) =
                   setSelectedSourceSolutions(data.selectedOptions);
                 }}
               >
-                {allSolutions.map((solution) => (
+                {availableSolutions.map((solution) => (
                   <Option key={solution.uniqueName} value={solution.uniqueName} text={solution.displayName}>
                     {solution.displayName} ({solution.uniqueName})
                   </Option>
@@ -283,7 +211,7 @@ export const ImprovedIndexTab: React.FC<IndexTabProps> = ({ onIndexComplete }) =
           hint="Solutions to analyze for layering"
           required
         >
-          {loadingSolutions ? (
+          {!metadataLoaded ? (
             <Spinner size="tiny" />
           ) : (
             <>
@@ -295,7 +223,7 @@ export const ImprovedIndexTab: React.FC<IndexTabProps> = ({ onIndexComplete }) =
                   setSelectedTargetSolutions(data.selectedOptions);
                 }}
               >
-                {allSolutions.map((solution) => (
+                {availableSolutions.map((solution) => (
                   <Option key={solution.uniqueName} value={solution.uniqueName} text={solution.displayName}>
                     {solution.displayName} ({solution.uniqueName})
                   </Option>
@@ -334,9 +262,9 @@ export const ImprovedIndexTab: React.FC<IndexTabProps> = ({ onIndexComplete }) =
               Component Types
             </InfoLabel>
           }
-          hint={`${selectedComponentTypes.length} of ${allComponentTypes.length} types selected`}
+          hint={`${selectedComponentTypes.length} of ${availableComponentTypes.length} types selected`}
         >
-          {loadingComponentTypes ? (
+          {!metadataLoaded ? (
             <Spinner size="tiny" />
           ) : (
             <>
@@ -348,7 +276,7 @@ export const ImprovedIndexTab: React.FC<IndexTabProps> = ({ onIndexComplete }) =
                   setSelectedComponentTypes(data.selectedOptions);
                 }}
               >
-                {allComponentTypes.map((type) => (
+                {availableComponentTypes.map((type) => (
                   <Option key={type.name} value={type.name} text={type.displayName}>
                     {type.displayName}
                   </Option>
@@ -358,8 +286,8 @@ export const ImprovedIndexTab: React.FC<IndexTabProps> = ({ onIndexComplete }) =
                 <Button
                   size="small"
                   appearance="subtle"
-                  onClick={() => setSelectedComponentTypes(allComponentTypes.map(ct => ct.name))}
-                  disabled={selectedComponentTypes.length === allComponentTypes.length}
+                  onClick={() => setSelectedComponentTypes(availableComponentTypes.map(ct => ct.name))}
+                  disabled={selectedComponentTypes.length === availableComponentTypes.length}
                 >
                   Select All
                 </Button>
@@ -384,16 +312,16 @@ export const ImprovedIndexTab: React.FC<IndexTabProps> = ({ onIndexComplete }) =
             appearance="primary"
             icon={<PlayRegular />}
             onClick={handleIndex}
-            disabled={loading || loadingSolutions || loadingComponentTypes}
+            disabled={isBusy}
           >
-            {loading ? 'Indexing...' : 'Start Indexing'}
+            {isIndexing ? 'Indexing...' : 'Start Indexing'}
           </Button>
           
           <Button
             appearance="secondary"
             icon={<ArrowSyncRegular />}
             onClick={handleClear}
-            disabled={loading}
+            disabled={isIndexing}
           >
             Clear Index
           </Button>
@@ -416,9 +344,9 @@ export const ImprovedIndexTab: React.FC<IndexTabProps> = ({ onIndexComplete }) =
             {indexCompletion.stats && (
               <div style={{ marginTop: tokens.spacingVerticalS }}>
                 <Text size={300}>
-                  Solutions: {indexCompletion.stats.solutionCount} | 
-                  Components: {indexCompletion.stats.componentCount} | 
-                  Layers: {indexCompletion.stats.layerCount}
+                  Solutions: {indexCompletion.stats.solutions} | 
+                  Components: {indexCompletion.stats.components} | 
+                  Layers: {indexCompletion.stats.layers}
                 </Text>
               </div>
             )}

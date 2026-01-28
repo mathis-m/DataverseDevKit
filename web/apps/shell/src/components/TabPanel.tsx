@@ -84,8 +84,8 @@ interface TabItemProps {
 
 const TabItem: React.FC<TabItemProps> = React.memo(({
   tab,
-  isActive,
-  onActivate,
+  isActive: _isActive,
+  onActivate: _onActivate,
   onClose,
   onConnectionChange,
 }) => {

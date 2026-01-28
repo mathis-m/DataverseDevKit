@@ -4,7 +4,6 @@ using DataverseDevKit.Core.Abstractions;
 using DataverseDevKit.PluginHost.Contracts;
 using DataverseDevKit.PluginHost.Runtime;
 using System.Text.Json;
-using System.Text.Encodings.Web;
 
 namespace DataverseDevKit.PluginHost.Services;
 
@@ -15,8 +14,7 @@ public sealed class PluginHostGrpcService : PluginHostService.PluginHostServiceB
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
     private readonly ILogger<PluginHostGrpcService> _logger;

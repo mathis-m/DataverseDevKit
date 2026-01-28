@@ -1,7 +1,6 @@
 using DataverseDevKit.Host.Bridge;
 using DataverseDevKit.Host.Services;
 using Microsoft.Extensions.Logging;
-using System.Text.Encodings.Web;
 using System.Text.Json;
 
 namespace DataverseDevKit.Host;
@@ -53,10 +52,10 @@ public partial class MainPage : ContentPage
             
             if (!string.IsNullOrEmpty(response))
             {
-                // Send response back to JavaScript via EvaluateJavaScriptAsync
-                // Use JavaScriptEncoder to properly escape the JSON string for JavaScript
-                var escapedResponse = JavaScriptEncoder.Default.Encode(response);
-                var script = $"window.__ddkBridge.handleResponse('{escapedResponse}');";
+                // Encode response as base64 to avoid escaping issues with nested JSON strings
+                var base64Response = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(response));
+                var script = $"window.__ddkBridge.handleResponse('{base64Response}');";
+                _logger.LogDebug("Sending base64 encoded response");
                 await hybridWebView.EvaluateJavaScriptAsync(script);
                 _logger.LogInformation("✅ Response sent successfully");
             }
@@ -106,9 +105,9 @@ public partial class MainPage : ContentPage
             {
                 try
                 {
-                    // Forward to frontend
-                    var escapedEvent = JavaScriptEncoder.Default.Encode(eventJson);
-                    var script = $"window.__ddkBridge.handleResponse('{escapedEvent}');";
+                    // Encode event as base64 to avoid escaping issues
+                    var base64Event = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(eventJson));
+                    var script = $"window.__ddkBridge.handleResponse('{base64Event}');";
                     await hybridWebView.EvaluateJavaScriptAsync(script);
                     
                     _logger.LogInformation("✅ Event forwarded to frontend: {EventType}", evt.Type);

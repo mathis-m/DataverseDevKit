@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { hostBridge, type PluginMetadata } from '@ddk/host-sdk';
+import { hostBridge } from '@ddk/host-sdk';
 import { usePluginStore } from '../stores/plugins';
 
 export const usePlugins = () => {

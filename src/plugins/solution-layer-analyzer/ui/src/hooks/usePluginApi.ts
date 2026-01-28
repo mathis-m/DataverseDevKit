@@ -1,7 +1,8 @@
 import { useState, useCallback, useEffect } from 'react';
 import { hostBridge } from '@ddk/host-sdk';
-import { ComponentResult, IndexResponse, IndexCompletionEvent } from '../types';
+import { ComponentResult, IndexResponse, IndexCompletionEvent, FilterNode } from '../types';
 import { AnalyticsData } from '../types/analytics';
+import { transformFilterForBackend } from '../utils/filterTransform';
 
 const PLUGIN_ID = 'com.ddk.solutionlayeranalyzer';
 
@@ -35,13 +36,14 @@ export const usePluginApi = () => {
   const indexSolutions = useCallback(async (
     sourceSolutions: string[],
     targetSolutions: string[],
-    componentTypes?: string[]
+    componentTypes?: string[],
+    connectionId: string = 'default'
   ): Promise<IndexResponse> => {
     setIndexing(true);
     setIndexCompletion(null);
     try {
       const payload = JSON.stringify({
-        connectionId: 'default',
+        connectionId,
         sourceSolutions,
         targetSolutions,
         includeComponentTypes: componentTypes || ['SystemForm', 'SavedQuery', 'RibbonCustomization', 'Entity', 'Attribute'],
@@ -58,14 +60,16 @@ export const usePluginApi = () => {
   }, []);
 
   const queryComponents = useCallback(async (
-    filters?: any,
+    filters?: FilterNode | null,
     skip = 0,
-    take = 1000
+    take = 1000,
+    connectionId: string = 'default'
   ): Promise<ComponentResult[]> => {
     setQuerying(true);
     try {
       const payload = JSON.stringify({
-        filters: filters || null,
+        connectionId,
+        filters: transformFilterForBackend(filters ?? null),
         paging: { skip, take },
         sort: [{ field: 'componentType', dir: 'asc' }],
       });
@@ -80,9 +84,12 @@ export const usePluginApi = () => {
     }
   }, []);
 
-  const getComponentDetails = useCallback(async (componentId: string): Promise<any> => {
+  const getComponentDetails = useCallback(async (
+    componentId: string,
+    connectionId: string = 'default'
+  ): Promise<any> => {
     try {
-      const payload = JSON.stringify({ componentId });
+      const payload = JSON.stringify({ componentId, connectionId });
       const result = await hostBridge.invokePluginCommand(PLUGIN_ID, 'details', payload);
       return result;
     } catch (error) {
@@ -94,13 +101,14 @@ export const usePluginApi = () => {
   const diffComponentLayers = useCallback(async (
     componentId: string,
     leftSolution: string,
-    rightSolution: string
+    rightSolution: string,
+    connectionId: string = 'default'
   ): Promise<{ leftText: string; rightText: string; mime: string; warnings?: string[] }> => {
     setDiffing(true);
     try {
       const payload = JSON.stringify({
         componentId,
-        connectionId: 'default',
+        connectionId,
         left: { solutionName: leftSolution, payloadType: 'auto' },
         right: { solutionName: rightSolution, payloadType: 'auto' },
       });
@@ -115,9 +123,9 @@ export const usePluginApi = () => {
     }
   }, []);
 
-  const clearIndex = useCallback(async (): Promise<void> => {
+  const clearIndex = useCallback(async (connectionId: string = 'default'): Promise<void> => {
     try {
-      await hostBridge.invokePluginCommand(PLUGIN_ID, 'clear', '{}');
+      await hostBridge.invokePluginCommand(PLUGIN_ID, 'clear', JSON.stringify({ connectionId }));
     } catch (error) {
       console.error('Clear error:', error);
       throw error;
@@ -135,7 +143,7 @@ export const usePluginApi = () => {
     try {
       const payload = JSON.stringify(config);
       const result = await hostBridge.invokePluginCommand(PLUGIN_ID, 'saveIndexConfig', payload);
-      return typeof result === 'string' ? JSON.parse(result) : result;
+      return result;
     } catch (error) {
       console.error('Save index config error:', error);
       throw error;
@@ -148,7 +156,7 @@ export const usePluginApi = () => {
     try {
       const payload = JSON.stringify(request);
       const result = await hostBridge.invokePluginCommand(PLUGIN_ID, 'loadIndexConfigs', payload);
-      return typeof result === 'string' ? JSON.parse(result) : result;
+      return result;
     } catch (error) {
       console.error('Load index configs error:', error);
       throw error;
@@ -159,12 +167,15 @@ export const usePluginApi = () => {
     name: string;
     connectionId?: string;
     originatingIndexHash?: string;
-    filter: any;
+    filter: FilterNode | null;
   }): Promise<{ configId: number }> => {
     try {
-      const payload = JSON.stringify(config);
+      const payload = JSON.stringify({
+        ...config,
+        filter: transformFilterForBackend(config.filter),
+      });
       const result = await hostBridge.invokePluginCommand(PLUGIN_ID, 'saveFilterConfig', payload);
-      return typeof result === 'string' ? JSON.parse(result) : result;
+      return result;
     } catch (error) {
       console.error('Save filter config error:', error);
       throw error;
@@ -178,9 +189,31 @@ export const usePluginApi = () => {
     try {
       const payload = JSON.stringify(request);
       const result = await hostBridge.invokePluginCommand(PLUGIN_ID, 'loadFilterConfigs', payload);
-      return typeof result === 'string' ? JSON.parse(result) : result;
+      return result;
     } catch (error) {
       console.error('Load filter configs error:', error);
+      throw error;
+    }
+  }, []);
+
+  const fetchSolutions = useCallback(async (connectionId: string = 'default'): Promise<{ solutions: any[] }> => {
+    try {
+      const payload = JSON.stringify({ connectionId });
+      const result = await hostBridge.invokePluginCommand(PLUGIN_ID, 'fetchSolutions', payload);
+      return result;
+    } catch (error) {
+      console.error('Fetch solutions error:', error);
+      throw error;
+    }
+  }, []);
+
+  const getComponentTypes = useCallback(async (): Promise<{ componentTypes: any[] }> => {
+    try {
+      const payload = JSON.stringify({});
+      const result = await hostBridge.invokePluginCommand(PLUGIN_ID, 'getComponentTypes', payload);
+      return result;
+    } catch (error) {
+      console.error('Get component types error:', error);
       throw error;
     }
   }, []);
@@ -195,6 +228,8 @@ export const usePluginApi = () => {
     loadIndexConfigs,
     saveFilterConfig,
     loadFilterConfigs,
+    fetchSolutions,
+    getComponentTypes,
     indexCompletion,
     loading: {
       indexing,
@@ -206,7 +241,7 @@ export const usePluginApi = () => {
         const payload = JSON.stringify({ connectionId });
         const result = await hostBridge.invokePluginCommand(PLUGIN_ID, 'getAnalytics', payload);
         console.log('Analytics data received:', result);
-        return JSON.parse(result);
+        return result;
       } catch (error) {
         console.error('Failed to get analytics:', error);
         throw error;

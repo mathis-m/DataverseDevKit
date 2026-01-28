@@ -53,8 +53,17 @@ export class HostBridge {
 
   private handleMessage(data: string): void {
     try {
-      console.log('[HostBridge] Received message:', data);
-      const message = typeof data === 'string' ? JSON.parse(data) : data;
+      // Decode from base64 (data is base64 encoded to avoid escaping issues)
+      let jsonString: string;
+      try {
+        jsonString = atob(data);
+      } catch {
+        // Fallback: if not base64, assume it's raw JSON (for backward compatibility)
+        jsonString = data;
+      }
+      
+      console.log('[HostBridge] Received message:', jsonString);
+      const message = JSON.parse(jsonString);
 
       // Check if it's an event
       if ('type' in message && 'pluginId' in message) {
