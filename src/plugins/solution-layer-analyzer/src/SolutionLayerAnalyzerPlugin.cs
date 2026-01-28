@@ -178,6 +178,12 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
                 Name = "getComponentTypes",
                 Label = "Get Component Types",
                 Description = "Get all supported component types"
+            },
+            new()
+            {
+                Name = "getAnalytics",
+                Label = "Get Analytics",
+                Description = "Get comprehensive analytics including risk scores, violations, and graph data"
             }
         };
 
@@ -209,6 +215,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             "clear" => await ExecuteClearAsync(cancellationToken),
             "fetchSolutions" => await ExecuteFetchSolutionsAsync(payload, cancellationToken),
             "getComponentTypes" => await ExecuteGetComponentTypesAsync(cancellationToken),
+            "getAnalytics" => await ExecuteGetAnalyticsAsync(payload, cancellationToken),
             "saveIndexConfig" => await ExecuteSaveIndexConfigAsync(payload, cancellationToken),
             "loadIndexConfigs" => await ExecuteLoadIndexConfigsAsync(payload, cancellationToken),
             "saveFilterConfig" => await ExecuteSaveFilterConfigAsync(payload, cancellationToken),
@@ -605,6 +612,36 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         };
 
         return Task.FromResult(JsonSerializer.SerializeToElement(response, JsonOptions));
+    }
+
+    private async Task<JsonElement> ExecuteGetAnalyticsAsync(string payload, CancellationToken cancellationToken)
+    {
+        var request = JsonSerializer.Deserialize<GetAnalyticsRequest>(payload, JsonOptions)
+            ?? new GetAnalyticsRequest();
+
+        _context!.Logger.LogInformation("Computing analytics");
+
+        // Serialize database access
+        await _dbLock.WaitAsync(cancellationToken);
+        try
+        {
+            using var dbContext = CreateDbContext();
+            
+            var analyticsService = new AnalyticsService(_context.Logger);
+            var analytics = await analyticsService.ComputeAnalyticsAsync(dbContext, cancellationToken);
+            
+            _context.Logger.LogInformation(
+                "Analytics computed: {Solutions} solutions, {Components} components with risks, {Violations} violations detected",
+                analytics.SolutionMetrics.Count,
+                analytics.ComponentRisks.Count,
+                analytics.Violations.Count);
+            
+            return JsonSerializer.SerializeToElement(analytics, JsonOptions);
+        }
+        finally
+        {
+            _dbLock.Release();
+        }
     }
 
     /// <inheritdoc/>
