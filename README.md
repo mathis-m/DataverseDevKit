@@ -44,11 +44,7 @@ DataverseDevKit includes a powerful plugin system that allows extending function
 - `details` - Get full layer stack for a specific component
 - `diff` - Compare payloads between two layers
 
-**Status**: Backend implementation complete (Phase 1). UI development planned for future phases.
-
-### Sample Plugin
-
-A "Hello World" reference implementation demonstrating the complete plugin development workflow with both backend (.NET) and frontend (React) components.
+**Status**: Fully implemented with comprehensive React UI including dashboards, visualizations (tree, Sankey, heatmap, network graph, etc.), filtering, and diff views.
 
 ## 🏗️ Architecture
 
@@ -203,9 +199,9 @@ public interface IToolPlugin
 
 #### JSON-RPC (UI ↔ Host)
 
-Used for bidirectional communication between React UI and .NET Host:
+Used for **bidirectional** communication between React UI and .NET Host. The UI can send commands to the host, and the host can push events to the UI.
 
-**Request Format**:
+**Request Format** (UI → Host):
 ```json
 {
   "jsonrpc": "2.0",
@@ -220,7 +216,7 @@ Used for bidirectional communication between React UI and .NET Host:
 }
 ```
 
-**Response Format**:
+**Response Format** (Host → UI):
 ```json
 {
   "jsonrpc": "2.0",
@@ -232,7 +228,7 @@ Used for bidirectional communication between React UI and .NET Host:
 }
 ```
 
-**Events** (Host → UI):
+**Events** (Host → UI, Push Notifications):
 ```json
 {
   "jsonrpc": "2.0",
@@ -242,6 +238,21 @@ Used for bidirectional communication between React UI and .NET Host:
     "data": {"phase": "layers", "percent": 45}
   }
 }
+```
+
+**Event Subscription** (UI):
+Plugins subscribe to events using the singleton `hostBridge`:
+```typescript
+import { hostBridge } from '@ddk/host-sdk';
+
+// Subscribe to events from plugin backend
+hostBridge.addEventListener('plugin:sla:progress', (data) => {
+  console.log('Progress:', data.phase, data.percent);
+});
+
+hostBridge.addEventListener('plugin:sla:index-complete', (data) => {
+  console.log('Indexing complete:', data.stats);
+});
 ```
 
 #### gRPC (Host ↔ Plugin Runtime)
@@ -267,35 +278,50 @@ service TokenProviderHostService {
 
 ### Module Federation (Plugin UI)
 
-Plugin UI components are loaded dynamically at runtime using Vite Module Federation:
+Plugin UI components are loaded dynamically at runtime using Vite Module Federation. The shell loads plugin remotes dynamically based on plugin manifests, rather than having them hardcoded in configuration.
 
 **Shell Configuration** (`web/apps/shell/vite.config.ts`):
 ```typescript
 federation({
   name: 'shell',
-  remotes: {
-    helloWorldUi: 'http://localhost:5174/dist/assets/remoteEntry.js'
-  },
-  shared: ['react', 'react-dom', '@fluentui/react-components']
+  remotes: {},  // Empty - plugins loaded dynamically at runtime
+  shared: {
+    'react': { version: '18.3.1' },
+    'react-dom': { version: '18.3.1' },
+    '@fluentui/react-components': {},
+    '@fluentui/react-icons': {},
+    '@ddk/host-sdk': {},  // Includes singleton hostBridge instance
+  }
 })
 ```
 
-**Plugin Configuration** (plugin's `vite.config.ts`):
+**Plugin Configuration** (example `vite.config.ts`):
 ```typescript
 federation({
-  name: 'helloWorldUi',
+  name: 'solutionLayerAnalyzer',
   filename: 'remoteEntry.js',
   exposes: {
     './Plugin': './src/Plugin.tsx'
   },
-  shared: ['react', 'react-dom', '@fluentui/react-components']
+  shared: ['react', 'react-dom', '@fluentui/react-components', '@ddk/host-sdk']
 })
 ```
 
-This ensures:
+**HostBridge Singleton**: The `@ddk/host-sdk` package exports a singleton `hostBridge` instance that all plugins share for communication with the host. This ensures consistent JSON-RPC messaging and event handling across all plugin instances.
+
+```typescript
+// From @ddk/host-sdk
+import { hostBridge } from '@ddk/host-sdk';
+
+// All plugins use the same instance
+const result = await hostBridge.executeCommand({ pluginId, command, payload });
+```
+
+This architecture ensures:
 - Shared dependencies are loaded once
 - Plugins are isolated in their own bundles
 - Dynamic loading without rebuilding the Shell
+- Consistent communication layer via singleton hostBridge
 
 ### Data Flow Example: Running a Plugin Command
 
@@ -331,20 +357,16 @@ DataverseDevKit/
 │   │   ├── Contracts/                    # gRPC Protocol Buffers
 │   │   └── DataverseDevKit.slnx          # .NET Solution
 │   └── plugins/                          # Plugin Projects
-│       ├── solution-layer-analyzer/      # Solution Layer Analyzer
-│       │   ├── src/                      # Plugin implementation
-│       │   ├── ui/                       # React UI (planned)
-│       │   └── plugin.manifest.json      # Plugin metadata
-│       └── sample-plugin/                # Hello World sample
+│       └── solution-layer-analyzer/      # Solution Layer Analyzer
+│           ├── src/                      # Backend implementation (.NET)
+│           ├── ui/                       # Frontend UI (React, fully implemented)
+│           └── plugin.manifest.json      # Plugin metadata
 ├── web/                                  # Web Frontend (pnpm monorepo)
 │   ├── packages/
 │   │   ├── host-sdk/                     # TypeScript SDK for plugins
 │   │   └── ui-components/                # Shared FluentUI components
-│   ├── apps/
-│   │   └── shell/                        # Main Shell application
-│   └── plugins/
-│       └── first-party/
-│           └── hello-world-ui/           # Sample plugin UI
+│   └── apps/
+│       └── shell/                        # Main Shell application
 ├── tools/                                # Build tools and schemas
 ├── docs/                                 # Additional documentation
 ├── build-web.ps1                         # Web build script
@@ -416,14 +438,9 @@ Or run UI standalone for faster development:
 
 ```powershell
 # Shell UI (hot reload enabled)
-cd web
+cd web/apps/shell
 pnpm dev
 # Opens at http://localhost:5173
-
-# Plugin UI (in separate terminal)
-cd web/plugins/first-party/hello-world-ui
-pnpm dev
-# Opens at http://localhost:5174
 ```
 
 #### 3. Build for Production
