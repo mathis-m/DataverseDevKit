@@ -14,6 +14,7 @@ import {
   CodeRegular,
 } from '@fluentui/react-icons';
 import { IndexTab } from './components/IndexTab';
+import { ImprovedIndexTab } from './components/ImprovedIndexTab';
 import { AnalysisTab } from './components/AnalysisTab';
 import { DiffTab } from './components/DiffTab';
 import { Footer } from './components/Footer';
@@ -177,7 +178,7 @@ const Plugin: React.FC<PluginProps> = ({ instanceId }) => {
         </TabList>
 
         {selectedTab === 'index' && (
-          <IndexTab onIndexComplete={handleIndexComplete} />
+          <ImprovedIndexTab onIndexComplete={handleIndexComplete} />
         )}
 
         {selectedTab === 'analysis' && (
