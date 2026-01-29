@@ -129,42 +129,52 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
   // Notify parent of filter changes
   useEffect(() => {
     onFilterChange(filteredComponents);
-  }, [filteredComponents, onFilterChange]);
+  }, [filteredComponents]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Convert simple filters to advanced filter AST
+  // Create a stable string representation for memoization
+  const simpleFiltersKey = useMemo(() => 
+    JSON.stringify({ searchText, selectedTypes, selectedSolutions, managedFilter }),
+    [searchText, selectedTypes, selectedSolutions, managedFilter]
+  );
+  
   const convertSimpleFiltersToAdvanced = useMemo((): FilterNode | null => {
+    // Parse the key back to get values (ensures memoization works correctly)
+    const { searchText: search, selectedTypes: types, selectedSolutions: solutions, managedFilter: managed } = 
+      JSON.parse(simpleFiltersKey);
+    
     const conditions: FilterNode[] = [];
 
     // Search filter -> OR of multiple ATTRIBUTE filters
-    if (searchText) {
+    if (search) {
       const searchConditions: FilterNode[] = [
         {
           type: 'ATTRIBUTE',
           id: 'search-logical',
           attribute: AttributeTarget.LogicalName,
           operator: StringOperator.Contains,
-          value: searchText
+          value: search
         },
         {
           type: 'ATTRIBUTE',
           id: 'search-display',
           attribute: AttributeTarget.DisplayName,
           operator: StringOperator.Contains,
-          value: searchText
+          value: search
         },
         {
           type: 'ATTRIBUTE',
           id: 'search-type',
           attribute: AttributeTarget.ComponentType,
           operator: StringOperator.Contains,
-          value: searchText
+          value: search
         },
         {
           type: 'ATTRIBUTE',
           id: 'search-table',
           attribute: AttributeTarget.TableLogicalName,
           operator: StringOperator.Contains,
-          value: searchText
+          value: search
         }
       ];
       conditions.push({
@@ -175,17 +185,17 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
     }
 
     // Type filter -> OR of ATTRIBUTE filters for each type
-    if (selectedTypes.length > 0) {
-      if (selectedTypes.length === 1) {
+    if (types.length > 0) {
+      if (types.length === 1) {
         conditions.push({
           type: 'ATTRIBUTE',
           id: 'type-single',
           attribute: AttributeTarget.ComponentType,
           operator: StringOperator.Equals,
-          value: selectedTypes[0]
+          value: types[0]
         });
       } else {
-        const typeConditions = selectedTypes.map((type, idx) => ({
+        const typeConditions = types.map((type: string, idx: number) => ({
           type: 'ATTRIBUTE',
           id: `type-${idx}`,
           attribute: AttributeTarget.ComponentType,
@@ -201,23 +211,23 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
     }
 
     // Solution filter -> HAS_ANY
-    if (selectedSolutions.length > 0) {
+    if (solutions.length > 0) {
       conditions.push({
         type: 'HAS_ANY',
         id: 'solutions',
-        solutions: selectedSolutions
+        solutions: solutions
       });
     }
 
     // Managed filter -> MANAGED node (using existing node type if available, otherwise ATTRIBUTE)
-    if (managedFilter !== 'all') {
+    if (managed !== 'all') {
       // For now, we'll use MANAGED node which exists in backend
       conditions.push({
         type: 'MANAGED',
         id: 'managed',
         // Note: The MANAGED node in backend expects isManaged boolean
         // This will need to be handled in the transform
-        value: managedFilter === 'managed' ? 'true' : 'false'
+        value: managed === 'managed' ? 'true' : 'false'
       });
     }
 
@@ -233,7 +243,7 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
         children: conditions
       };
     }
-  }, [searchText, selectedTypes, selectedSolutions, managedFilter]);
+  }, [simpleFiltersKey]); // Use the stable key instead of individual deps
 
   // Combined advanced filter: user's explicit advanced filter OR simple filters converted to advanced
   const combinedAdvancedFilter = useMemo((): FilterNode | null => {
@@ -244,12 +254,24 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
       // In simple mode, convert simple filters to advanced filter
       return convertSimpleFiltersToAdvanced;
     }
-  }, [advancedMode, advancedFilter, convertSimpleFiltersToAdvanced]);
+  }, [advancedMode, advancedFilter, simpleFiltersKey]); // Use simpleFiltersKey for stable dep
 
   // Notify parent when combined advanced filter changes (for backend query)
+  // Use JSON stringification to avoid triggering on reference changes with same content
+  const filterJson = useMemo(() => 
+    combinedAdvancedFilter ? JSON.stringify(combinedAdvancedFilter) : null,
+    [combinedAdvancedFilter]
+  );
+  
   useEffect(() => {
+    // Update the store with the combined filter (for AnalysisTab to query with)
+    // Only update if in simple mode - in advanced mode, user edits directly
+    if (!advancedMode) {
+      setAdvancedFilter(combinedAdvancedFilter);
+    }
+    // Also notify parent for backward compatibility
     onAdvancedFilterChange?.(combinedAdvancedFilter);
-  }, [combinedAdvancedFilter, onAdvancedFilterChange]);
+  }, [filterJson, advancedMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeFilterCount = 
     (searchText ? 1 : 0) +

@@ -107,10 +107,15 @@ export const AnalysisTab: React.FC<AnalysisTabProps> = ({ onNavigateToDiff }) =>
   }, [queryComponents, setAllComponents, setFilteredComponents]);
 
   // Load components on mount and when advancedFilter changes
-  // Zustand guarantees stable references when the value hasn't changed
+  // Use JSON stringification to avoid re-triggering when object reference changes but content is same
+  const advancedFilterJson = useMemo(() => 
+    advancedFilter ? JSON.stringify(advancedFilter) : null,
+    [advancedFilter]
+  );
+  
   React.useEffect(() => {
     loadComponents(advancedFilter);
-  }, [advancedFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [advancedFilterJson]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleFilterChange = useCallback((filtered: ComponentResult[]) => {
     setFilteredComponents(filtered);
