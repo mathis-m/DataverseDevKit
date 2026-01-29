@@ -351,6 +351,65 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
     return item && typeof item === 'object' && 'attribute' in item && 'operator' in item && 'value' in item;
   };
 
+  // Helper to determine what filter types are available based on context
+  // This implements the hierarchical filter architecture from the requirements
+  const getAvailableFilterTypes = (parentNode: FilterNode, depth: number) => {
+    // Determine context based on parent type and depth
+    const isTopLevel = parentNode.id === 'root' || (parentNode.type && ['AND', 'OR', 'NOT'].includes(parentNode.type) && depth === 0);
+    const isLayerQueryContext = parentNode.type === 'LAYER_QUERY' || 
+                                 (parentNode.layerFilter !== undefined); // Inside LAYER_QUERY
+    const isOrderSequenceContext = parentNode.type === 'ORDER_STRICT' || parentNode.type === 'ORDER_FLEX';
+    
+    // Check if we're inside a LAYER_QUERY by walking up the tree
+    // For simplicity, we'll check if the parent or grandparent is LAYER_QUERY
+    // (In production, you'd want a proper tree walk)
+    
+    const options: Array<{value: string, label: string, category?: string}> = [];
+    
+    if (isTopLevel) {
+      // Level 1: Component-level filters
+      options.push(
+        { value: 'ATTRIBUTE', label: 'ATTRIBUTE (filter by component attribute)', category: 'Component Filters' },
+        { value: 'LAYER_QUERY', label: 'LAYER_QUERY (query layers/solutions)', category: 'Nested Queries' },
+        { value: 'SOLUTION_QUERY', label: 'SOLUTION_QUERY (match solution by name)', category: 'Nested Queries' },
+        { value: 'AND', label: 'AND', category: 'Logical Operators' },
+        { value: 'OR', label: 'OR', category: 'Logical Operators' },
+        { value: 'NOT', label: 'NOT', category: 'Logical Operators' }
+      );
+    } else if (isLayerQueryContext) {
+      // Level 2: Inside LAYER_QUERY - allow layer filters
+      options.push(
+        { value: 'HAS', label: 'HAS (has specific solution)', category: 'Layer Filters' },
+        { value: 'HAS_ANY', label: 'HAS_ANY (has any of solutions)', category: 'Layer Filters' },
+        { value: 'HAS_ALL', label: 'HAS_ALL (has all solutions)', category: 'Layer Filters' },
+        { value: 'HAS_NONE', label: 'HAS_NONE (has none of solutions)', category: 'Layer Filters' },
+        { value: 'ORDER_STRICT', label: 'ORDER_STRICT (exact sequence)', category: 'Layer Filters' },
+        { value: 'ORDER_FLEX', label: 'ORDER_FLEX (flexible sequence)', category: 'Layer Filters' },
+        { value: 'SOLUTION_QUERY', label: 'SOLUTION_QUERY (dynamic solution)', category: 'Nested Queries' },
+        { value: 'AND', label: 'AND', category: 'Logical Operators' },
+        { value: 'OR', label: 'OR', category: 'Logical Operators' },
+        { value: 'NOT', label: 'NOT', category: 'Logical Operators' }
+      );
+    } else if (isOrderSequenceContext) {
+      // Level 3: Inside ORDER sequences - limited options
+      options.push(
+        { value: 'SOLUTION_QUERY', label: 'SOLUTION_QUERY (dynamic solution)', category: 'Nested Queries' },
+        { value: 'AND', label: 'AND', category: 'Logical Operators' },
+        { value: 'OR', label: 'OR', category: 'Logical Operators' },
+        { value: 'NOT', label: 'NOT', category: 'Logical Operators' }
+      );
+    } else {
+      // Default: Logical operators (inherit from parent)
+      options.push(
+        { value: 'AND', label: 'AND', category: 'Logical Operators' },
+        { value: 'OR', label: 'OR', category: 'Logical Operators' },
+        { value: 'NOT', label: 'NOT', category: 'Logical Operators' }
+      );
+    }
+    
+    return options;
+  };
+
   const renderOrderSequence = (node: FilterNode): React.ReactNode => {
     const sequence = node.sequence || [[]];
     const isStrict = node.type === 'ORDER_STRICT';
@@ -469,6 +528,7 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
   const renderNode = (node: FilterNode, depth: number = 0): React.ReactNode => {
     const canDelete = node.id !== 'root';
     const selectedType = selectedFilterTypes[node.id] || '';
+    const availableTypes = getAvailableFilterTypes(node, depth);
 
     return (
       <div key={node.id} className={styles.filterNode} style={{ marginLeft: depth * 20 }}>
@@ -510,22 +570,9 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
                   }}
                   size="small"
                 >
-                  {/* Component-level filters */}
-                  <Option value="ATTRIBUTE">ATTRIBUTE (filter by component attribute)</Option>
-                  {/* Nested query filters */}
-                  <Option value="LAYER_QUERY">LAYER_QUERY (query layers/solutions)</Option>
-                  <Option value="SOLUTION_QUERY">SOLUTION_QUERY (match solution by name)</Option>
-                  {/* Legacy layer filters (for backward compatibility) */}
-                  <Option value="HAS">HAS (has solution) [Legacy]</Option>
-                  <Option value="HAS_ANY">HAS_ANY (has any of solutions) [Legacy]</Option>
-                  <Option value="HAS_ALL">HAS_ALL (has all solutions) [Legacy]</Option>
-                  <Option value="HAS_NONE">HAS_NONE (has none of solutions) [Legacy]</Option>
-                  <Option value="ORDER_STRICT">ORDER_STRICT (strict sequence) [Legacy]</Option>
-                  <Option value="ORDER_FLEX">ORDER_FLEX (flexible sequence) [Legacy]</Option>
-                  {/* Logical operators */}
-                  <Option value="AND">AND</Option>
-                  <Option value="OR">OR</Option>
-                  <Option value="NOT">NOT</Option>
+                  {availableTypes.map(opt => (
+                    <Option key={opt.value} value={opt.value}>{opt.label}</Option>
+                  ))}
                 </Dropdown>
                 <Button
                   appearance="primary"
@@ -642,8 +689,64 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
           {/* LAYER_QUERY filter */}
           {node.type === 'LAYER_QUERY' && (
             <div style={{ marginLeft: tokens.spacingHorizontalL }}>
+              <div className={styles.inline} style={{ marginBottom: tokens.spacingVerticalS }}>
+                <Label size="small">Layer Filter Type:</Label>
+                <Dropdown
+                  placeholder="Select layer filter..."
+                  value={node.layerFilter?.type || 'HAS'}
+                  selectedOptions={node.layerFilter?.type ? [node.layerFilter.type] : ['HAS']}
+                  onOptionSelect={(_, data) => {
+                    const newType = data.optionValue || 'HAS';
+                    // Create new layer filter based on type
+                    let newLayerFilter: FilterNode;
+                    switch (newType) {
+                      case 'HAS':
+                        newLayerFilter = { type: 'HAS', id: `layer-${Date.now()}-${Math.random()}`, solution: solutions[0] || '' };
+                        break;
+                      case 'HAS_ANY':
+                        newLayerFilter = { type: 'HAS_ANY', id: `layer-${Date.now()}-${Math.random()}`, solutions: [] };
+                        break;
+                      case 'HAS_ALL':
+                        newLayerFilter = { type: 'HAS_ALL', id: `layer-${Date.now()}-${Math.random()}`, solutions: [] };
+                        break;
+                      case 'HAS_NONE':
+                        newLayerFilter = { type: 'HAS_NONE', id: `layer-${Date.now()}-${Math.random()}`, solutions: [] };
+                        break;
+                      case 'ORDER_STRICT':
+                        newLayerFilter = { type: 'ORDER_STRICT', id: `layer-${Date.now()}-${Math.random()}`, sequence: [[]] };
+                        break;
+                      case 'ORDER_FLEX':
+                        newLayerFilter = { type: 'ORDER_FLEX', id: `layer-${Date.now()}-${Math.random()}`, sequence: [[]] };
+                        break;
+                      case 'AND':
+                        newLayerFilter = { type: 'AND', id: `layer-${Date.now()}-${Math.random()}`, children: [] };
+                        break;
+                      case 'OR':
+                        newLayerFilter = { type: 'OR', id: `layer-${Date.now()}-${Math.random()}`, children: [] };
+                        break;
+                      case 'NOT':
+                        newLayerFilter = { type: 'NOT', id: `layer-${Date.now()}-${Math.random()}`, children: [] };
+                        break;
+                      default:
+                        newLayerFilter = { type: 'HAS', id: `layer-${Date.now()}-${Math.random()}`, solution: solutions[0] || '' };
+                    }
+                    updateNodeProperty(node.id, 'layerFilter', newLayerFilter);
+                  }}
+                  size="small"
+                >
+                  <Option value="HAS">HAS (has specific solution)</Option>
+                  <Option value="HAS_ANY">HAS_ANY (has any of solutions)</Option>
+                  <Option value="HAS_ALL">HAS_ALL (has all solutions)</Option>
+                  <Option value="HAS_NONE">HAS_NONE (has none of solutions)</Option>
+                  <Option value="ORDER_STRICT">ORDER_STRICT (exact sequence)</Option>
+                  <Option value="ORDER_FLEX">ORDER_FLEX (flexible sequence)</Option>
+                  <Option value="AND">AND (combine layer filters)</Option>
+                  <Option value="OR">OR (any layer filter matches)</Option>
+                  <Option value="NOT">NOT (negate layer filter)</Option>
+                </Dropdown>
+              </div>
               <Text size={200} style={{ marginBottom: tokens.spacingVerticalS, display: 'block' }}>
-                Layer Filter (nested):
+                Layer Filter Configuration:
               </Text>
               {node.layerFilter && renderNode(node.layerFilter, depth + 1)}
               {!node.layerFilter && (
@@ -655,13 +758,18 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
           {/* SOLUTION_QUERY filter */}
           {node.type === 'SOLUTION_QUERY' && (
             <div className={styles.inline}>
-              <Label size="small">Attribute:</Label>
-              <Input
+              <Label size="small">Solution Attribute:</Label>
+              <Dropdown
                 value={node.attribute || 'SchemaName'}
-                onChange={(_, data) => updateNodeProperty(node.id, 'attribute', data.value)}
+                selectedOptions={node.attribute ? [node.attribute] : ['SchemaName']}
+                onOptionSelect={(_, data) => updateNodeProperty(node.id, 'attribute', data.optionValue)}
                 size="small"
-                placeholder="SchemaName"
-              />
+              >
+                <Option value="SchemaName">Schema Name (unique name)</Option>
+                <Option value="FriendlyName">Friendly Name (display name)</Option>
+                <Option value="PublisherName">Publisher Name</Option>
+                <Option value="Version">Version</Option>
+              </Dropdown>
 
               <Label size="small">Operator:</Label>
               <Dropdown

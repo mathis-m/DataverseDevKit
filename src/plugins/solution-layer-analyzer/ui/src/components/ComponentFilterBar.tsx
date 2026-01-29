@@ -115,12 +115,30 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
   const selectedSolutions = localSelectedSolutions;
   const managedFilter = localManagedFilter;
 
-  // Extract unique values for filters
-  const uniqueTypes = useMemo(() => {
-    const types = new Set<string>();
-    components.forEach(c => types.add(c.componentType));
-    return Array.from(types).sort();
-  }, [components]);
+  // All available component types (static list - not filtered by current results)
+  // This ensures users can always filter by any component type, regardless of current results
+  const allComponentTypes = useMemo(() => [
+    'Entity',
+    'Attribute',
+    'SystemForm',
+    'SavedQuery',
+    'SavedQueryVisualization',
+    'RibbonCustomization',
+    'WebResource',
+    'SDKMessageProcessingStep',
+    'Workflow',
+    'AppModule',
+    'SiteMap',
+    'OptionSet',
+    'PluginAssembly',
+    'PluginType',
+    'ServiceEndpoint',
+    'CustomAPI',
+    'Report',
+    'EmailTemplate',
+    'Dashboard',
+    'Chart',
+  ].sort(), []);
 
   const uniqueSolutions = useMemo(() => {
     const solutions = new Set<string>();
@@ -355,7 +373,7 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
                   setSelectedTypes(data.selectedOptions);
                 }}
               >
-                {uniqueTypes.map(type => (
+                {allComponentTypes.map(type => (
                   <Option key={type} value={type}>{type}</Option>
                 ))}
               </Dropdown>
