@@ -18,8 +18,37 @@ namespace Ddk.SolutionLayerAnalyzer.Filters;
 [JsonDerivedType(typeof(ComponentTypeFilterNode), "COMPONENT_TYPE")]
 [JsonDerivedType(typeof(ManagedFilterNode), "MANAGED")]
 [JsonDerivedType(typeof(PublisherFilterNode), "PUBLISHER")]
+[JsonDerivedType(typeof(AttributeFilterNode), "ATTRIBUTE")]
+[JsonDerivedType(typeof(SolutionQueryNode), "SOLUTION_QUERY")]
 public abstract class FilterNode
 {
+}
+
+/// <summary>
+/// String comparison operators for attribute filters.
+/// </summary>
+public enum StringOperator
+{
+    Equals,
+    NotEquals,
+    Contains,
+    NotContains,
+    BeginsWith,
+    NotBeginsWith,
+    EndsWith,
+    NotEndsWith
+}
+
+/// <summary>
+/// Attribute targets for filtering.
+/// </summary>
+public enum AttributeTarget
+{
+    LogicalName,
+    DisplayName,
+    ComponentType,
+    Publisher,
+    TableLogicalName
 }
 
 /// <summary>
@@ -76,8 +105,11 @@ public sealed class HasNoneFilterNode : FilterNode
 public sealed class OrderStrictFilterNode : FilterNode
 {
     /// <summary>
-    /// Gets or sets the sequence of solution names or choice groups.
-    /// Each item can be a string (solution name) or a list of strings (any of these solutions).
+    /// Gets or sets the sequence of solution names, choice groups, or solution queries.
+    /// Each item can be:
+    /// - A string (static solution name)
+    /// - A list of strings (any of these solutions)
+    /// - A SolutionQueryNode (dynamic solution selection)
     /// </summary>
     [JsonPropertyName("sequence")]
     public List<object> Sequence { get; set; } = new();
@@ -89,7 +121,11 @@ public sealed class OrderStrictFilterNode : FilterNode
 public sealed class OrderFlexFilterNode : FilterNode
 {
     /// <summary>
-    /// Gets or sets the sequence of solution names or choice groups.
+    /// Gets or sets the sequence of solution names, choice groups, or solution queries.
+    /// Each item can be:
+    /// - A string (static solution name)
+    /// - A list of strings (any of these solutions)
+    /// - A SolutionQueryNode (dynamic solution selection)
     /// </summary>
     [JsonPropertyName("sequence")]
     public List<object> Sequence { get; set; } = new();
@@ -165,4 +201,56 @@ public sealed class PublisherFilterNode : FilterNode
     /// </summary>
     [JsonPropertyName("publisher")]
     public string Publisher { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Attribute-based filter with string operators.
+/// </summary>
+public sealed class AttributeFilterNode : FilterNode
+{
+    /// <summary>
+    /// Gets or sets the attribute target to filter on.
+    /// </summary>
+    [JsonPropertyName("attribute")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public AttributeTarget Attribute { get; set; }
+
+    /// <summary>
+    /// Gets or sets the string comparison operator.
+    /// </summary>
+    [JsonPropertyName("operator")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public StringOperator Operator { get; set; }
+
+    /// <summary>
+    /// Gets or sets the value to compare against.
+    /// </summary>
+    [JsonPropertyName("value")]
+    public string Value { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Represents a dynamic solution query for use in ORDER nodes.
+/// Allows filtering solutions based on their schema name or other properties.
+/// </summary>
+public sealed class SolutionQueryNode
+{
+    /// <summary>
+    /// Gets or sets the attribute to filter on (typically SchemaName).
+    /// </summary>
+    [JsonPropertyName("attribute")]
+    public string Attribute { get; set; } = "SchemaName";
+
+    /// <summary>
+    /// Gets or sets the string comparison operator.
+    /// </summary>
+    [JsonPropertyName("operator")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public StringOperator Operator { get; set; }
+
+    /// <summary>
+    /// Gets or sets the value to compare against.
+    /// </summary>
+    [JsonPropertyName("value")]
+    public string Value { get; set; } = string.Empty;
 }

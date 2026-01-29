@@ -40,13 +40,42 @@ export interface IndexStats {
   warnings?: string[];
 }
 
+export enum StringOperator {
+  Equals = 'Equals',
+  NotEquals = 'NotEquals',
+  Contains = 'Contains',
+  NotContains = 'NotContains',
+  BeginsWith = 'BeginsWith',
+  NotBeginsWith = 'NotBeginsWith',
+  EndsWith = 'EndsWith',
+  NotEndsWith = 'NotEndsWith'
+}
+
+export enum AttributeTarget {
+  LogicalName = 'LogicalName',
+  DisplayName = 'DisplayName',
+  ComponentType = 'ComponentType',
+  Publisher = 'Publisher',
+  TableLogicalName = 'TableLogicalName'
+}
+
+export interface SolutionQueryNode {
+  attribute: string;
+  operator: StringOperator;
+  value: string;
+}
+
 export interface FilterNode {
   type: string;
   id: string;
   solution?: string;
   solutions?: string[];
-  sequence?: (string | string[])[];
+  sequence?: (string | string[] | SolutionQueryNode)[];
   children?: FilterNode[];
+  // New attribute filter properties
+  attribute?: AttributeTarget;
+  operator?: StringOperator;
+  value?: string;
 }
 
 export interface IndexResponse {

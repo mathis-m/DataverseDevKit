@@ -32,6 +32,7 @@ public class FilterEvaluator
             ComponentTypeFilterNode componentType => EvaluateComponentType(componentType, component),
             ManagedFilterNode managed => EvaluateManaged(managed, component),
             PublisherFilterNode publisher => EvaluatePublisher(publisher, component),
+            AttributeFilterNode attribute => EvaluateAttribute(attribute, component),
             _ => true
         };
     }
@@ -96,13 +97,37 @@ public class FilterEvaluator
             {
                 matches = currentLayer.Equals(singleSolution, StringComparison.OrdinalIgnoreCase);
             }
-            else if (sequenceItem is JsonElement jsonElement && jsonElement.ValueKind == JsonValueKind.Array)
+            else if (sequenceItem is JsonElement jsonElement)
             {
-                // Handle array of solution choices
-                var choices = jsonElement.EnumerateArray()
-                    .Select(e => e.GetString() ?? string.Empty)
-                    .ToList();
-                matches = choices.Any(choice => currentLayer.Equals(choice, StringComparison.OrdinalIgnoreCase));
+                if (jsonElement.ValueKind == JsonValueKind.Array)
+                {
+                    // Handle array of solution choices
+                    var choices = jsonElement.EnumerateArray()
+                        .Select(e => e.GetString() ?? string.Empty)
+                        .ToList();
+                    matches = choices.Any(choice => currentLayer.Equals(choice, StringComparison.OrdinalIgnoreCase));
+                }
+                else if (jsonElement.ValueKind == JsonValueKind.Object)
+                {
+                    // Try to deserialize as SolutionQueryNode
+                    try
+                    {
+                        var query = JsonSerializer.Deserialize<SolutionQueryNode>(jsonElement.GetRawText());
+                        if (query != null)
+                        {
+                            matches = EvaluateSolutionQuery(query, currentLayer);
+                        }
+                    }
+                    catch
+                    {
+                        // Not a valid SolutionQueryNode, skip
+                    }
+                }
+            }
+            else if (sequenceItem is SolutionQueryNode query)
+            {
+                // Handle direct SolutionQueryNode (when not coming from JSON)
+                matches = EvaluateSolutionQuery(query, currentLayer);
             }
 
             if (matches)
@@ -156,5 +181,55 @@ public class FilterEvaluator
     {
         return component.Layers.Any(l => 
             l.Publisher != null && l.Publisher.Equals(filter.Publisher, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private bool EvaluateAttribute(AttributeFilterNode filter, Component component)
+    {
+        var targetValue = filter.Attribute switch
+        {
+            AttributeTarget.LogicalName => component.LogicalName,
+            AttributeTarget.DisplayName => component.DisplayName ?? string.Empty,
+            AttributeTarget.ComponentType => component.ComponentType,
+            AttributeTarget.TableLogicalName => component.TableLogicalName ?? string.Empty,
+            AttributeTarget.Publisher => GetComponentPublisher(component),
+            _ => string.Empty
+        };
+
+        return EvaluateStringOperator(filter.Operator, targetValue, filter.Value);
+    }
+
+    private string GetComponentPublisher(Component component)
+    {
+        // Get the first publisher from layers (could be refined)
+        return component.Layers.FirstOrDefault()?.Publisher ?? string.Empty;
+    }
+
+    private bool EvaluateStringOperator(StringOperator op, string targetValue, string filterValue)
+    {
+        var comparison = StringComparison.OrdinalIgnoreCase;
+
+        return op switch
+        {
+            StringOperator.Equals => targetValue.Equals(filterValue, comparison),
+            StringOperator.NotEquals => !targetValue.Equals(filterValue, comparison),
+            StringOperator.Contains => targetValue.Contains(filterValue, comparison),
+            StringOperator.NotContains => !targetValue.Contains(filterValue, comparison),
+            StringOperator.BeginsWith => targetValue.StartsWith(filterValue, comparison),
+            StringOperator.NotBeginsWith => !targetValue.StartsWith(filterValue, comparison),
+            StringOperator.EndsWith => targetValue.EndsWith(filterValue, comparison),
+            StringOperator.NotEndsWith => !targetValue.EndsWith(filterValue, comparison),
+            _ => true
+        };
+    }
+
+    /// <summary>
+    /// Evaluates a solution query against a solution name.
+    /// Used within ORDER sequence evaluation.
+    /// </summary>
+    private bool EvaluateSolutionQuery(SolutionQueryNode query, string solutionName)
+    {
+        // For now, we only support SchemaName attribute
+        // The solutionName IS the schema name in our context
+        return EvaluateStringOperator(query.Operator, solutionName, query.Value);
     }
 }
