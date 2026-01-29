@@ -45,7 +45,9 @@ public sealed class PluginHostGrpcService : PluginHostService.PluginHostServiceB
                     _logger,
                     request.TokenCallbackSocket,
                     new Uri(request.ActiveConnectionUrl),
-                    request.ActiveConnectionId);
+                    request.ActiveConnectionId,
+                    enableConnectionPooling: true,  // Enable connection pooling for plugin workers
+                    maxConcurrencyPerEnvironment: 10);
             }
             else
             {
