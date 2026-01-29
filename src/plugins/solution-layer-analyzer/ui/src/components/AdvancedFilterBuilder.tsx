@@ -130,6 +130,33 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
   // Track if we're in the initial mount phase
   const isInitialMount = useRef(true);
   
+  // Update rootFilter when initialFilter prop changes (e.g., switching from simple to advanced mode)
+  // This ensures that simple filters are visible when switching to advanced mode
+  useEffect(() => {
+    if (initialFilter) {
+      // Only update if the filter content actually changed
+      // Use JSON comparison to avoid unnecessary updates and infinite loops
+      const filterJson = JSON.stringify(initialFilter);
+      const currentJson = JSON.stringify(rootFilter);
+      
+      if (filterJson !== currentJson) {
+        console.log('[AdvancedFilterBuilder] initialFilter changed, updating rootFilter:', JSON.stringify(initialFilter, null, 2));
+        setRootFilter({
+          ...initialFilter,
+          id: initialFilter.id || 'root',
+        });
+      }
+    } else if (initialFilter === null && rootFilter.children && rootFilter.children.length > 0) {
+      // If initialFilter becomes null, reset to empty root
+      console.log('[AdvancedFilterBuilder] initialFilter became null, resetting rootFilter');
+      setRootFilter({
+        type: 'AND',
+        id: 'root',
+        children: [],
+      });
+    }
+  }, [initialFilter]); // Intentionally not including rootFilter to avoid circular updates
+  
   // Stable callback ref to avoid closure issues
   const onFilterChangeRef = useRef(onFilterChange);
   useEffect(() => {
