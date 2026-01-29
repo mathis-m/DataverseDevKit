@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useMemo, useEffect } from 'react';
 import {
   makeStyles,
   tokens,
@@ -18,6 +18,7 @@ import {
 import { ComponentResult } from '../types';
 import { AdvancedFilterBuilder } from './AdvancedFilterBuilder';
 import { FilterNode } from '../types';
+import { useAppStore } from '../store/useAppStore';
 
 const useStyles = makeStyles({
   filterBar: {
@@ -58,12 +59,24 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
 }) => {
   const styles = useStyles();
   
-  const [searchText, setSearchText] = useState('');
-  const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
-  const [selectedSolutions, setSelectedSolutions] = useState<string[]>([]);
-  const [managedFilter, setManagedFilter] = useState<string>('all');
-  const [advancedMode, setAdvancedMode] = useState(false);
-  const [advancedFilter, setAdvancedFilter] = useState<FilterNode | null>(null);
+  // Use store for filter state
+  const { filterBarState, setFilterBarState } = useAppStore();
+  const {
+    searchText,
+    selectedTypes,
+    selectedSolutions,
+    managedFilter,
+    advancedMode,
+    advancedFilter,
+  } = filterBarState;
+
+  // Setters that update the store
+  const setSearchText = (value: string) => setFilterBarState({ searchText: value });
+  const setSelectedTypes = (value: string[]) => setFilterBarState({ selectedTypes: value });
+  const setSelectedSolutions = (value: string[]) => setFilterBarState({ selectedSolutions: value });
+  const setManagedFilter = (value: string) => setFilterBarState({ managedFilter: value });
+  const setAdvancedMode = (value: boolean) => setFilterBarState({ advancedMode: value });
+  const setAdvancedFilter = (value: FilterNode | null) => setFilterBarState({ advancedFilter: value });
 
   // Extract unique values for filters
   const uniqueTypes = useMemo(() => {
@@ -115,12 +128,12 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
   }, [components, searchText, selectedTypes, selectedSolutions, managedFilter]);
 
   // Notify parent of filter changes
-  React.useEffect(() => {
+  useEffect(() => {
     onFilterChange(filteredComponents);
   }, [filteredComponents, onFilterChange]);
 
   // Notify parent when advanced filter changes (for backend query)
-  React.useEffect(() => {
+  useEffect(() => {
     onAdvancedFilterChange?.(advancedFilter);
   }, [advancedFilter, onAdvancedFilterChange]);
 

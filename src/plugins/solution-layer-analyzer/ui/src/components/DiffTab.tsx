@@ -20,6 +20,7 @@ import {
 } from '@fluentui/react-icons';
 import { DiffEditor } from '@monaco-editor/react';
 import { usePluginApi } from '../hooks/usePluginApi';
+import { useAppStore } from '../store/useAppStore';
 
 const useStyles = makeStyles({
   section: {
@@ -120,14 +121,29 @@ export const DiffTab: React.FC<DiffTabProps> = ({
 }) => {
   const styles = useStyles();
   const { diffComponentLayers, loading } = usePluginApi();
+  const { diffState, setDiffState } = useAppStore();
   
-  const [componentId, setComponentId] = useState(initialComponentId || '');
-  const [leftSolution, setLeftSolution] = useState(initialLeftSolution || '');
-  const [rightSolution, setRightSolution] = useState(initialRightSolution || '');
-  const [leftPayload, setLeftPayload] = useState<any>(null);
-  const [rightPayload, setRightPayload] = useState<any>(null);
-  const [warnings, setWarnings] = useState<string[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
+  // Initialize from props or store
+  const [componentId, setComponentId] = useState(initialComponentId || diffState?.componentId || '');
+  const [leftSolution, setLeftSolution] = useState(initialLeftSolution || diffState?.leftSolution || '');
+  const [rightSolution, setRightSolution] = useState(initialRightSolution || diffState?.rightSolution || '');
+  const [leftPayload, setLeftPayload] = useState<any>(diffState?.leftPayload || null);
+  const [rightPayload, setRightPayload] = useState<any>(diffState?.rightPayload || null);
+  const [warnings, setWarnings] = useState<string[]>(diffState?.warnings || []);
+  const [searchTerm, setSearchTerm] = useState(diffState?.searchTerm || '');
+
+  // Sync state to store when it changes
+  React.useEffect(() => {
+    setDiffState({
+      componentId,
+      leftSolution,
+      rightSolution,
+      leftPayload,
+      rightPayload,
+      warnings,
+      searchTerm,
+    });
+  }, [componentId, leftSolution, rightSolution, leftPayload, rightPayload, warnings, searchTerm, setDiffState]);
 
   // Parse JSON payloads and extract attributes
   const parseAttributes = (jsonText: string): Record<string, any> => {

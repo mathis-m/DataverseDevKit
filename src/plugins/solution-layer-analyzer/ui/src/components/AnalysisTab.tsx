@@ -63,42 +63,59 @@ interface AnalysisTabProps {
 export const AnalysisTab: React.FC<AnalysisTabProps> = ({ onNavigateToDiff }) => {
   const styles = useStyles();
   const { queryComponents, loading } = usePluginApi();
-  const { availableSolutions } = useAppStore();
+  const { availableSolutions, analysisState, setAnalysisState, filterBarState } = useAppStore();
 
-  const [allComponents, setAllComponents] = useState<ComponentResult[]>([]);
-  const [filteredComponents, setFilteredComponents] = useState<ComponentResult[]>([]);
-  const [selectedComponent, setSelectedComponent] = useState<ComponentResult | null>(null);
-  const [advancedFilter, setAdvancedFilter] = useState<FilterNode | null>(null);
-  const [viewMode, setViewMode] = useState<'list' | 'visualizations'>('list');
-  const [visualizationType, setVisualizationType] = useState<'sankey' | 'heatmap' | 'stacked' | 'network' | 'circle' | 'treemap'>('network');
-  const [groupBy, setGroupBy] = useState<GroupByOption>('componentType');
+  // Extract state from store
+  const {
+    allComponents,
+    filteredComponents,
+    selectedComponent,
+    viewMode,
+    visualizationType,
+    groupBy,
+  } = analysisState;
+
+  // Setters that update the store
+  const setAllComponents = (components: ComponentResult[]) => 
+    setAnalysisState({ allComponents: components });
+  const setFilteredComponents = (components: ComponentResult[]) => 
+    setAnalysisState({ filteredComponents: components });
+  const setSelectedComponent = (component: ComponentResult | null) => 
+    setAnalysisState({ selectedComponent: component });
+  const setViewMode = (mode: 'list' | 'visualizations') => 
+    setAnalysisState({ viewMode: mode });
+  const setVisualizationType = (type: 'sankey' | 'heatmap' | 'stacked' | 'network' | 'circle' | 'treemap') => 
+    setAnalysisState({ visualizationType: type });
+  const setGroupBy = (by: 'componentType' | 'table' | 'publisher' | 'solution' | 'managed') => 
+    setAnalysisState({ groupBy: by });
+
   const [fullscreenViz, setFullscreenViz] = useState<boolean>(false);
 
   const loadComponents = useCallback(async (filter?: FilterNode | null) => {
     const components = await queryComponents(filter);
     setAllComponents(components);
     setFilteredComponents(components);
-  }, [queryComponents]);
+  }, [queryComponents, setAllComponents, setFilteredComponents]);
 
   React.useEffect(() => {
-    loadComponents(advancedFilter);
-  }, [loadComponents, advancedFilter]);
+    loadComponents(filterBarState.advancedFilter);
+  }, [loadComponents, filterBarState.advancedFilter]);
 
   const handleFilterChange = useCallback((filtered: ComponentResult[]) => {
     setFilteredComponents(filtered);
-  }, []);
+  }, [setFilteredComponents]);
 
-  const handleAdvancedFilterChange = useCallback((filter: FilterNode | null) => {
-    setAdvancedFilter(filter);
+  const handleAdvancedFilterChange = useCallback((_filter: FilterNode | null) => {
+    // This is now handled via the store through ComponentFilterBar
   }, []);
 
   const handleSelectComponent = useCallback((component: ComponentResult) => {
     setSelectedComponent(component);
-  }, []);
+  }, [setSelectedComponent]);
 
   const handleCloseDetail = useCallback(() => {
     setSelectedComponent(null);
-  }, []);
+  }, [setSelectedComponent]);
 
   const handleDiff = useCallback((leftSolution: string, rightSolution: string) => {
     if (selectedComponent) {
@@ -127,7 +144,7 @@ export const AnalysisTab: React.FC<AnalysisTabProps> = ({ onNavigateToDiff }) =>
             <Button 
               appearance="primary" 
               icon={<FilterRegular />}
-              onClick={() => loadComponents(advancedFilter)}
+              onClick={() => loadComponents(filterBarState.advancedFilter)}
               disabled={loading.querying}
             >
               {loading.querying ? 'Loading...' : 'Refresh'}

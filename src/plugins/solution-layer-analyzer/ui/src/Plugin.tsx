@@ -70,14 +70,14 @@ interface PluginProps {
 const Plugin: React.FC<PluginProps> = ({ instanceId }) => {
   const styles = useStyles();
   
-  const [selectedTab, setSelectedTab] = useState('index');
   const [indexStats, setIndexStats] = useState<IndexStats | null>(null);
   
-  // Diff navigation state - now from store
+  // Get state from store
   const { 
     diffState, setDiffState, indexConfig, 
     addOperation, updateOperation, removeOperation,
-    setAvailableSolutions, setAvailableComponentTypes, setMetadataLoaded, metadataLoaded
+    setAvailableSolutions, setAvailableComponentTypes, setMetadataLoaded, metadataLoaded,
+    selectedTab, setSelectedTab
   } = useAppStore();
   
   const { fetchSolutions, getComponentTypes } = usePluginApi();
