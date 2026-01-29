@@ -1,16 +1,17 @@
 # Build script to compile web frontend and copy to MAUI wwwroot
 
-$webRoot = Join-Path $PSScriptRoot "web"
+$rootDir = $PSScriptRoot
+$webRoot = Join-Path $rootDir "src\web"
 $shellDist = Join-Path $webRoot "apps\shell\dist"
 $pluginDist = Join-Path $webRoot "plugins\first-party\hello-world-ui\dist"
-$hostWwwroot = Join-Path $PSScriptRoot "src\dotnet\Host\wwwroot"
+$hostWwwroot = Join-Path $rootDir "src\dotnet\Host\wwwroot"
 
-# Build web projects
+# Build web projects from root (now uses root pnpm workspace)
 Write-Host "Building web frontend..."
-Set-Location $webRoot
+Set-Location $rootDir
 
 if (-not (Test-Path "node_modules")) {
-    Write-Host "Installing dependencies..."
+    Write-Host "Installing dependencies from root..."
     pnpm install
 }
 

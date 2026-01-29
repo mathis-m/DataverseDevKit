@@ -1,0 +1,7 @@
+packages:
+  # Core UI packages
+  - 'src/web/packages/*'
+  - 'src/web/apps/*'
+  
+  # Plugin UIs
+  - 'src/plugins/*/ui'

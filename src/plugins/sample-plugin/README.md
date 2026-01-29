@@ -38,22 +38,20 @@ dotnet build
 
 ### Frontend (React)
 
-From the `ui/` directory:
+From the repository root:
 
 ```powershell
-# Install dependencies (first time only, from web/ workspace root)
-cd ../../../../web
+# Install dependencies (first time only, from root)
 pnpm install
 
 # Build the UI
-cd ../src/plugins/sample-plugin/ui
-pnpm build
+pnpm --filter @ddk/plugin-sample-ui build
 ```
 
 Or for development with hot reloading:
 
 ```powershell
-pnpm dev
+pnpm --filter @ddk/plugin-sample-ui dev
 ```
 
 The dev server runs at `http://localhost:5175`.
@@ -86,11 +84,13 @@ console.log(result);
 
 ### Workspace Integration
 
-The UI can access `@ddk/host-sdk` via pnpm workspace because `web/pnpm-workspace.yaml` includes:
+The UI can access `@ddk/host-sdk` via pnpm workspace because the root `pnpm-workspace.yaml` includes:
 
 ```yaml
 packages:
-  - '../src/plugins/*/ui'
+  - 'src/web/packages/*'
+  - 'src/web/apps/*'
+  - 'src/plugins/*/ui'
 ```
 
 This allows `workspace:*` protocol in package.json without publishing the SDK.

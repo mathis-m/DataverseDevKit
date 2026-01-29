@@ -1,3 +1,10 @@
+# DEPRECATED: This workspace configuration is maintained for backwards compatibility.
+# The main pnpm workspace is now at the repository root.
+# Please run pnpm commands from the root directory.
+
 packages:
+  - 'packages/*'
   - 'apps/*'
-  - 'plugins/*'
+  - 'plugins/first-party/*'
+  # Plugin UIs are now managed by root workspace
+  - '../src/plugins/*/ui'

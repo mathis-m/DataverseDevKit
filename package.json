@@ -1,0 +1,35 @@
+{
+  "name": "@ddk/workspace-root",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DataverseDevKit monorepo root",
+  "scripts": {
+    "dev": "concurrently \"pnpm run dev:sdk\" \"pnpm --filter @ddk/shell dev\"",
+    "dev:sdk": "pnpm --filter @ddk/host-sdk dev",
+    "build": "pnpm -r build",
+    "build:shell": "pnpm --filter @ddk/shell build",
+    "build:plugins": "pnpm --filter \"@ddk/plugin-*\" build",
+    "type-check": "pnpm -r type-check",
+    "lint": "pnpm -r lint",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,css,md}\"",
+    "clean": "pnpm -r clean && rm -rf node_modules src/web/node_modules src/plugins/*/ui/node_modules"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "concurrently": "^9.1.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-react": "^7.33.2",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "prettier": "^3.2.5",
+    "typescript": "~5.7.3"
+  },
+  "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  }
+}
