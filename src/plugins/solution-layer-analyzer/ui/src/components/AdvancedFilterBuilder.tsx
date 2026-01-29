@@ -12,9 +12,10 @@ import {
   Tooltip,
   Tag,
   TagGroup,
+  Input,
 } from '@fluentui/react-components';
 import { DeleteRegular, InfoRegular, AddRegular, DismissRegular, ArrowUpRegular } from '@fluentui/react-icons';
-import { FilterNode } from '../types';
+import { FilterNode, AttributeTarget, StringOperator, SolutionQueryNode } from '../types';
 
 const useStyles = makeStyles({
   container: {
@@ -132,6 +133,11 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
       ...(childType === 'HAS_NONE' && { solutions: [] }),
       ...(childType === 'ORDER_STRICT' && { sequence: [[]] }),
       ...(childType === 'ORDER_FLEX' && { sequence: [[]] }),
+      ...(childType === 'ATTRIBUTE' && { 
+        attribute: AttributeTarget.LogicalName,
+        operator: StringOperator.Contains,
+        value: ''
+      }),
       ...(['AND', 'OR', 'NOT'].includes(childType) && { children: [] }),
     };
 
@@ -260,6 +266,40 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
     updateFilter(updateNode(rootFilter));
   };
 
+  const addSolutionQueryToSequenceStep = (nodeId: string, stepIndex: number, query: SolutionQueryNode) => {
+    const updateNode = (node: FilterNode): FilterNode => {
+      if (node.id === nodeId && node.sequence) {
+        const newSequence = [...node.sequence];
+        newSequence[stepIndex] = query;
+        return { ...node, sequence: newSequence };
+      }
+      if (node.children) {
+        return { ...node, children: node.children.map(child => updateNode(child)) };
+      }
+      return node;
+    };
+    updateFilter(updateNode(rootFilter));
+  };
+
+  const removeSolutionQueryFromSequenceStep = (nodeId: string, stepIndex: number) => {
+    const updateNode = (node: FilterNode): FilterNode => {
+      if (node.id === nodeId && node.sequence) {
+        const newSequence = [...node.sequence];
+        newSequence[stepIndex] = [];
+        return { ...node, sequence: newSequence };
+      }
+      if (node.children) {
+        return { ...node, children: node.children.map(child => updateNode(child)) };
+      }
+      return node;
+    };
+    updateFilter(updateNode(rootFilter));
+  };
+
+  const isSolutionQuery = (item: any): item is SolutionQueryNode => {
+    return item && typeof item === 'object' && 'attribute' in item && 'operator' in item && 'value' in item;
+  };
+
   const renderOrderSequence = (node: FilterNode): React.ReactNode => {
     const sequence = node.sequence || [[]];
     const isStrict = node.type === 'ORDER_STRICT';
@@ -272,8 +312,10 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
             : 'Layers must appear in order but may have other layers between (flexible sequence)'}
         </Text>
         
-        {sequence.map((step: string | string[], stepIndex: number) => {
-          const stepSolutions = Array.isArray(step) ? step : (step ? [step] : []);
+        {sequence.map((step: string | string[] | SolutionQueryNode, stepIndex: number) => {
+          // Check if this step is a solution query
+          const isQuery = isSolutionQuery(step);
+          const stepSolutions = isQuery ? [] : (Array.isArray(step) ? step : (step ? [step] : []));
           const availableSolutions = solutions.filter(s => !stepSolutions.includes(s));
           
           return (
@@ -295,38 +337,65 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
               </div>
               
               <div className={styles.sequenceStepContent}>
-                {stepSolutions.length > 0 && (
-                  <TagGroup>
-                    {stepSolutions.map((sol: string) => (
-                      <Tag
-                        key={sol}
-                        dismissible
-                        dismissIcon={<DismissRegular />}
-                        value={sol}
-                        onClick={() => removeSolutionFromSequenceStep(node.id, stepIndex, sol)}
+                {isQuery ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
+                    <Tag dismissible dismissIcon={<DismissRegular />} onClick={() => removeSolutionQueryFromSequenceStep(node.id, stepIndex)}>
+                      Query: {step.attribute} {step.operator} "{step.value}"
+                    </Tag>
+                  </div>
+                ) : (
+                  <>
+                    {stepSolutions.length > 0 && (
+                      <TagGroup>
+                        {stepSolutions.map((sol: string) => (
+                          <Tag
+                            key={sol}
+                            dismissible
+                            dismissIcon={<DismissRegular />}
+                            value={sol}
+                            onClick={() => removeSolutionFromSequenceStep(node.id, stepIndex, sol)}
+                          >
+                            {sol}
+                          </Tag>
+                        ))}
+                      </TagGroup>
+                    )}
+                    
+                    {availableSolutions.length > 0 && (
+                      <Dropdown
+                        placeholder={stepSolutions.length > 0 ? 'Add additional...' : 'Select solution...'}
+                        onOptionSelect={(_, data) => {
+                          if (data.optionValue) {
+                            addSolutionToSequenceStep(node.id, stepIndex, data.optionValue);
+                          }
+                        }}
+                        size="small"
+                        selectedOptions={[]}
+                        value=""
                       >
-                        {sol}
-                      </Tag>
-                    ))}
-                  </TagGroup>
+                        {availableSolutions.map(sol => (
+                          <Option key={sol} value={sol}>{sol}</Option>
+                        ))}
+                      </Dropdown>
+                    )}
+                  </>
                 )}
                 
-                {availableSolutions.length > 0 && (
-                  <Dropdown
-                    placeholder={stepSolutions.length > 0 ? 'Add additional...' : 'Select solution...'}
-                    onOptionSelect={(_, data) => {
-                      if (data.optionValue) {
-                        addSolutionToSequenceStep(node.id, stepIndex, data.optionValue);
-                      }
-                    }}
+                {!isQuery && stepSolutions.length === 0 && (
+                  <Button
+                    appearance="subtle"
                     size="small"
-                    selectedOptions={[]}
-                    value=""
+                    onClick={() => {
+                      const query: SolutionQueryNode = {
+                        attribute: 'SchemaName',
+                        operator: StringOperator.BeginsWith,
+                        value: ''
+                      };
+                      addSolutionQueryToSequenceStep(node.id, stepIndex, query);
+                    }}
                   >
-                    {availableSolutions.map(sol => (
-                      <Option key={sol} value={sol}>{sol}</Option>
-                    ))}
-                  </Dropdown>
+                    Or use Solution Query
+                  </Button>
                 )}
               </div>
             </div>
@@ -396,6 +465,7 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
                   <Option value="HAS_NONE">HAS_NONE (has none of solutions)</Option>
                   <Option value="ORDER_STRICT">ORDER_STRICT (strict sequence)</Option>
                   <Option value="ORDER_FLEX">ORDER_FLEX (flexible sequence)</Option>
+                  <Option value="ATTRIBUTE">ATTRIBUTE (filter by attribute)</Option>
                   <Option value="AND">AND</Option>
                   <Option value="OR">OR</Option>
                   <Option value="NOT">NOT</Option>
@@ -467,6 +537,50 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
 
           {/* ORDER_STRICT, ORDER_FLEX filters */}
           {['ORDER_STRICT', 'ORDER_FLEX'].includes(node.type) && renderOrderSequence(node)}
+
+          {/* ATTRIBUTE filter */}
+          {node.type === 'ATTRIBUTE' && (
+            <div className={styles.inline}>
+              <Label size="small">Attribute:</Label>
+              <Dropdown
+                value={node.attribute || AttributeTarget.LogicalName}
+                selectedOptions={node.attribute ? [node.attribute] : [AttributeTarget.LogicalName]}
+                onOptionSelect={(_, data) => updateNodeProperty(node.id, 'attribute', data.optionValue)}
+                size="small"
+              >
+                <Option value={AttributeTarget.LogicalName}>Logical Name</Option>
+                <Option value={AttributeTarget.DisplayName}>Display Name</Option>
+                <Option value={AttributeTarget.ComponentType}>Component Type</Option>
+                <Option value={AttributeTarget.Publisher}>Publisher</Option>
+                <Option value={AttributeTarget.TableLogicalName}>Table Logical Name</Option>
+              </Dropdown>
+
+              <Label size="small">Operator:</Label>
+              <Dropdown
+                value={node.operator || StringOperator.Contains}
+                selectedOptions={node.operator ? [node.operator] : [StringOperator.Contains]}
+                onOptionSelect={(_, data) => updateNodeProperty(node.id, 'operator', data.optionValue)}
+                size="small"
+              >
+                <Option value={StringOperator.Equals}>Equals</Option>
+                <Option value={StringOperator.NotEquals}>Not Equals</Option>
+                <Option value={StringOperator.Contains}>Contains</Option>
+                <Option value={StringOperator.NotContains}>Not Contains</Option>
+                <Option value={StringOperator.BeginsWith}>Begins With</Option>
+                <Option value={StringOperator.NotBeginsWith}>Not Begins With</Option>
+                <Option value={StringOperator.EndsWith}>Ends With</Option>
+                <Option value={StringOperator.NotEndsWith}>Not Ends With</Option>
+              </Dropdown>
+
+              <Label size="small">Value:</Label>
+              <Input
+                value={node.value || ''}
+                onChange={(_, data) => updateNodeProperty(node.id, 'value', data.value)}
+                size="small"
+                placeholder="Enter value..."
+              />
+            </div>
+          )}
         </div>
       </div>
     );
