@@ -11,8 +11,6 @@ namespace DataverseDevKit.PluginHost.Services;
 /// </summary>
 public sealed class DataverseClientMultiplexer : IDisposable
 {
-    private sealed record EnvKey(string InstanceUrl);
-
     private sealed class EnvEntry : IDisposable
     {
         public ServiceClient Root { get; }
@@ -34,7 +32,7 @@ public sealed class DataverseClientMultiplexer : IDisposable
         }
     }
 
-    private readonly ConcurrentDictionary<EnvKey, EnvEntry> _environments = new();
+    private readonly ConcurrentDictionary<string, EnvEntry> _environments = new();
     private readonly ILogger _logger;
     private readonly int _maxConcurrencyPerEnvironment;
     private bool _disposed;
@@ -54,10 +52,8 @@ public sealed class DataverseClientMultiplexer : IDisposable
     public void RegisterEnvironment(string instanceUrl, Func<ServiceClient> rootClientFactory)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        var key = new EnvKey(instanceUrl);
         
-        _environments.GetOrAdd(key, k =>
+        _environments.GetOrAdd(instanceUrl, key =>
         {
             _logger.LogInformation("Registering new environment: {InstanceUrl}", instanceUrl);
             var root = rootClientFactory();
@@ -75,10 +71,8 @@ public sealed class DataverseClientMultiplexer : IDisposable
     public ServiceClient GetServiceClient(string instanceUrl)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        var key = new EnvKey(instanceUrl);
         
-        if (!_environments.TryGetValue(key, out var entry))
+        if (!_environments.TryGetValue(instanceUrl, out var entry))
         {
             throw new InvalidOperationException($"Environment not registered: {instanceUrl}");
         }
@@ -91,7 +85,8 @@ public sealed class DataverseClientMultiplexer : IDisposable
 
     /// <summary>
     /// Gets a multiplexed ServiceClient that is leased from the pool.
-    /// The client is locked and must be disposed to return it to the pool.
+    /// The client is leased from the pool and occupies a concurrency slot.
+    /// It must be disposed to return it to the pool and release the slot.
     /// </summary>
     /// <param name="instanceUrl">The Dataverse instance URL</param>
     /// <param name="cancellationToken">Cancellation token</param>
@@ -100,10 +95,8 @@ public sealed class DataverseClientMultiplexer : IDisposable
     public async Task<LeasedServiceClient> GetMultiplexedClientAsync(string instanceUrl, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        var key = new EnvKey(instanceUrl);
         
-        if (!_environments.TryGetValue(key, out var entry))
+        if (!_environments.TryGetValue(instanceUrl, out var entry))
         {
             throw new InvalidOperationException($"Environment not registered: {instanceUrl}");
         }

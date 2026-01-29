@@ -20,7 +20,7 @@ public class TokenProxyServiceClientFactory : IServiceClientFactory, IAsyncDispo
     private readonly Uri _connectionUrl;
     private readonly string _connectionId;
     private readonly DataverseClientMultiplexer? _multiplexer;
-    private bool _multiplexerInitialized;
+    private volatile bool _multiplexerInitialized;
     private readonly object _multiplexerLock = new();
 
     public TokenProxyServiceClientFactory(
@@ -76,7 +76,8 @@ public class TokenProxyServiceClientFactory : IServiceClientFactory, IAsyncDispo
 
     /// <summary>
     /// Gets a multiplexed ServiceClient that is leased from the pool.
-    /// The client is locked and must be disposed to return it to the pool.
+    /// The client is leased from the pool and occupies a concurrency slot.
+    /// It must be disposed to return it to the pool and release the slot.
     /// This method requires connection pooling to be enabled.
     /// </summary>
     /// <param name="connectionId">The connection ID, or null for the active connection</param>

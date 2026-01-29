@@ -11,7 +11,7 @@ public sealed class LeasedServiceClient : IDisposable
     private readonly ServiceClient _client;
     private readonly ConcurrentBag<ServiceClient> _pool;
     private readonly SemaphoreSlim _gate;
-    private bool _disposed;
+    private int _disposed; // 0 = false, 1 = true
 
     internal LeasedServiceClient(ServiceClient client, ConcurrentBag<ServiceClient> pool, SemaphoreSlim gate)
     {
@@ -24,10 +24,9 @@ public sealed class LeasedServiceClient : IDisposable
 
     public void Dispose()
     {
-        if (_disposed)
+        // Use Interlocked.Exchange for thread-safe disposal check
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
             return;
-
-        _disposed = true;
 
         // Return client to pool
         _pool.Add(_client);
