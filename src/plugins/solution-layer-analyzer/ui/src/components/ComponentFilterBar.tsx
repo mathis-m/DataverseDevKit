@@ -15,9 +15,8 @@ import {
   DismissRegular,
   FilterRegular,
 } from '@fluentui/react-icons';
-import { ComponentResult } from '../types';
+import { ComponentResult, FilterNode, AttributeTarget, StringOperator } from '../types';
 import { AdvancedFilterBuilder } from './AdvancedFilterBuilder';
-import { FilterNode } from '../types';
 import { useAppStore } from '../store/useAppStore';
 
 const useStyles = makeStyles({
@@ -132,10 +131,125 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
     onFilterChange(filteredComponents);
   }, [filteredComponents, onFilterChange]);
 
-  // Notify parent when advanced filter changes (for backend query)
+  // Convert simple filters to advanced filter AST
+  const convertSimpleFiltersToAdvanced = useMemo((): FilterNode | null => {
+    const conditions: FilterNode[] = [];
+
+    // Search filter -> OR of multiple ATTRIBUTE filters
+    if (searchText) {
+      const searchConditions: FilterNode[] = [
+        {
+          type: 'ATTRIBUTE',
+          id: `search-logical-${Date.now()}`,
+          attribute: AttributeTarget.LogicalName,
+          operator: StringOperator.Contains,
+          value: searchText
+        },
+        {
+          type: 'ATTRIBUTE',
+          id: `search-display-${Date.now()}`,
+          attribute: AttributeTarget.DisplayName,
+          operator: StringOperator.Contains,
+          value: searchText
+        },
+        {
+          type: 'ATTRIBUTE',
+          id: `search-type-${Date.now()}`,
+          attribute: AttributeTarget.ComponentType,
+          operator: StringOperator.Contains,
+          value: searchText
+        },
+        {
+          type: 'ATTRIBUTE',
+          id: `search-table-${Date.now()}`,
+          attribute: AttributeTarget.TableLogicalName,
+          operator: StringOperator.Contains,
+          value: searchText
+        }
+      ];
+      conditions.push({
+        type: 'OR',
+        id: `search-or-${Date.now()}`,
+        children: searchConditions
+      });
+    }
+
+    // Type filter -> OR of ATTRIBUTE filters for each type
+    if (selectedTypes.length > 0) {
+      if (selectedTypes.length === 1) {
+        conditions.push({
+          type: 'ATTRIBUTE',
+          id: `type-${Date.now()}`,
+          attribute: AttributeTarget.ComponentType,
+          operator: StringOperator.Equals,
+          value: selectedTypes[0]
+        });
+      } else {
+        const typeConditions = selectedTypes.map(type => ({
+          type: 'ATTRIBUTE',
+          id: `type-${type}-${Date.now()}`,
+          attribute: AttributeTarget.ComponentType,
+          operator: StringOperator.Equals,
+          value: type
+        }));
+        conditions.push({
+          type: 'OR',
+          id: `type-or-${Date.now()}`,
+          children: typeConditions
+        });
+      }
+    }
+
+    // Solution filter -> HAS_ANY
+    if (selectedSolutions.length > 0) {
+      conditions.push({
+        type: 'HAS_ANY',
+        id: `solutions-${Date.now()}`,
+        solutions: selectedSolutions
+      });
+    }
+
+    // Managed filter -> MANAGED node (using existing node type if available, otherwise ATTRIBUTE)
+    if (managedFilter !== 'all') {
+      // For now, we'll use MANAGED node which exists in backend
+      conditions.push({
+        type: 'MANAGED',
+        id: `managed-${Date.now()}`,
+        // Note: The MANAGED node in backend expects isManaged boolean
+        // This will need to be handled in the transform
+        value: managedFilter === 'managed' ? 'true' : 'false'
+      });
+    }
+
+    // Combine all conditions with AND
+    if (conditions.length === 0) {
+      return null;
+    } else if (conditions.length === 1) {
+      return conditions[0];
+    } else {
+      return {
+        type: 'AND',
+        id: `root-${Date.now()}`,
+        children: conditions
+      };
+    }
+  }, [searchText, selectedTypes, selectedSolutions, managedFilter]);
+
+  // Combined advanced filter: user's explicit advanced filter OR simple filters converted to advanced
+  const combinedAdvancedFilter = useMemo((): FilterNode | null => {
+    if (advancedMode && advancedFilter) {
+      // In advanced mode, use only the explicit advanced filter
+      return advancedFilter;
+    } else {
+      // In simple mode, convert simple filters to advanced filter
+      return convertSimpleFiltersToAdvanced;
+    }
+  }, [advancedMode, advancedFilter, convertSimpleFiltersToAdvanced]);
+
+  // Notify parent when combined advanced filter changes (for backend query)
   useEffect(() => {
-    onAdvancedFilterChange?.(advancedFilter);
-  }, [advancedFilter, onAdvancedFilterChange]);
+    onAdvancedFilterChange?.(combinedAdvancedFilter);
+  }, [combinedAdvancedFilter, onAdvancedFilterChange]);
 
   const activeFilterCount = 
     (searchText ? 1 : 0) +
