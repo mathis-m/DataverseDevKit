@@ -427,10 +427,10 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
 
   // Helper to determine what filter types are available based on context
   // This implements the hierarchical filter architecture from the requirements
-  const getAvailableFilterTypes = (parentNode: FilterNode, depth: number) => {
+  const getAvailableFilterTypes = (parentNode: FilterNode, depth: number, isInLayerFilter: boolean = false) => {
     // Determine context based on parent type and depth
     const isTopLevel = parentNode.id === 'root' || (parentNode.type && ['AND', 'OR', 'NOT'].includes(parentNode.type) && depth === 0);
-    const isLayerQueryContext = parentNode.type === 'LAYER_QUERY' || 
+    const isLayerQueryContext = isInLayerFilter || parentNode.type === 'LAYER_QUERY' || 
                                  (parentNode.layerFilter !== undefined); // Inside LAYER_QUERY
     const isOrderSequenceContext = parentNode.type === 'ORDER_STRICT' || parentNode.type === 'ORDER_FLEX';
     
@@ -599,10 +599,10 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
     );
   };
 
-  const renderNode = (node: FilterNode, depth: number = 0): React.ReactNode => {
+  const renderNode = (node: FilterNode, depth: number = 0, isInLayerFilter: boolean = false): React.ReactNode => {
     const canDelete = node.id !== 'root';
     const selectedType = selectedFilterTypes[node.id] || '';
-    const availableTypes = getAvailableFilterTypes(node, depth);
+    const availableTypes = getAvailableFilterTypes(node, depth, isInLayerFilter);
 
     return (
       <div key={node.id} className={styles.filterNode} style={{ marginLeft: depth * 20 }}>
@@ -665,7 +665,7 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
 
               {node.children && node.children.length > 0 && (
                 <div>
-                  {node.children.map(child => renderNode(child, depth + 1))}
+                  {node.children.map(child => renderNode(child, depth + 1, isInLayerFilter))}
                 </div>
               )}
 
@@ -840,7 +840,7 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
               <Text size={200} style={{ marginBottom: tokens.spacingVerticalS, display: 'block' }}>
                 Layer Filter Configuration:
               </Text>
-              {node.layerFilter && renderNode(node.layerFilter, depth + 1)}
+              {node.layerFilter && renderNode(node.layerFilter, depth + 1, true)}
               {!node.layerFilter && (
                 <Text size={200} italic>No layer filter set</Text>
               )}
