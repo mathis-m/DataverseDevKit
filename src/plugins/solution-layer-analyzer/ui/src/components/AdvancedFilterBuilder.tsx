@@ -351,6 +351,53 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
     return item && typeof item === 'object' && 'attribute' in item && 'operator' in item && 'value' in item;
   };
 
+  // All available component types (static list)
+  const allComponentTypes = [
+    'Entity',
+    'Attribute',
+    'SystemForm',
+    'SavedQuery',
+    'SavedQueryVisualization',
+    'RibbonCustomization',
+    'WebResource',
+    'SDKMessageProcessingStep',
+    'Workflow',
+    'AppModule',
+    'SiteMap',
+    'OptionSet',
+    'PluginAssembly',
+    'PluginType',
+    'ServiceEndpoint',
+    'CustomAPI',
+    'Report',
+    'EmailTemplate',
+    'Dashboard',
+    'Chart',
+  ].sort();
+
+  // Helper to get appropriate operators for a given attribute type
+  const getOperatorsForAttribute = (attribute: AttributeTarget | string | undefined) => {
+    // For ComponentType and TableLogicalName, only show Equals/NotEquals (IS/IS NOT)
+    if (attribute === AttributeTarget.ComponentType || attribute === AttributeTarget.TableLogicalName) {
+      return [
+        { value: StringOperator.Equals, label: 'IS (Equals)' },
+        { value: StringOperator.NotEquals, label: 'IS NOT (Not Equals)' },
+      ];
+    }
+    
+    // For all other string attributes, show all operators
+    return [
+      { value: StringOperator.Equals, label: 'Equals' },
+      { value: StringOperator.NotEquals, label: 'Not Equals' },
+      { value: StringOperator.Contains, label: 'Contains' },
+      { value: StringOperator.NotContains, label: 'Not Contains' },
+      { value: StringOperator.BeginsWith, label: 'Begins With' },
+      { value: StringOperator.NotBeginsWith, label: 'Not Begins With' },
+      { value: StringOperator.EndsWith, label: 'Ends With' },
+      { value: StringOperator.NotEndsWith, label: 'Not Ends With' },
+    ];
+  };
+
   // Helper to determine what filter types are available based on context
   // This implements the hierarchical filter architecture from the requirements
   const getAvailableFilterTypes = (parentNode: FilterNode, depth: number) => {
@@ -649,7 +696,15 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
               <Dropdown
                 value={node.attribute || AttributeTarget.LogicalName}
                 selectedOptions={node.attribute ? [node.attribute] : [AttributeTarget.LogicalName]}
-                onOptionSelect={(_, data) => updateNodeProperty(node.id, 'attribute', data.optionValue)}
+                onOptionSelect={(_, data) => {
+                  updateNodeProperty(node.id, 'attribute', data.optionValue);
+                  // Reset operator to default when attribute changes
+                  const newAttribute = data.optionValue as AttributeTarget;
+                  const operators = getOperatorsForAttribute(newAttribute);
+                  if (operators.length > 0) {
+                    updateNodeProperty(node.id, 'operator', operators[0].value);
+                  }
+                }}
                 size="small"
               >
                 <Option value={AttributeTarget.LogicalName}>Logical Name</Option>
@@ -666,23 +721,33 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
                 onOptionSelect={(_, data) => updateNodeProperty(node.id, 'operator', data.optionValue)}
                 size="small"
               >
-                <Option value={StringOperator.Equals}>Equals</Option>
-                <Option value={StringOperator.NotEquals}>Not Equals</Option>
-                <Option value={StringOperator.Contains}>Contains</Option>
-                <Option value={StringOperator.NotContains}>Not Contains</Option>
-                <Option value={StringOperator.BeginsWith}>Begins With</Option>
-                <Option value={StringOperator.NotBeginsWith}>Not Begins With</Option>
-                <Option value={StringOperator.EndsWith}>Ends With</Option>
-                <Option value={StringOperator.NotEndsWith}>Not Ends With</Option>
+                {getOperatorsForAttribute(node.attribute).map(op => (
+                  <Option key={op.value} value={op.value}>{op.label}</Option>
+                ))}
               </Dropdown>
 
               <Label size="small">Value:</Label>
-              <Input
-                value={node.value || ''}
-                onChange={(_, data) => updateNodeProperty(node.id, 'value', data.value)}
-                size="small"
-                placeholder="Enter value..."
-              />
+              {/* Show dropdown for ComponentType, text input for others */}
+              {node.attribute === AttributeTarget.ComponentType ? (
+                <Dropdown
+                  value={node.value || ''}
+                  selectedOptions={node.value ? [node.value] : []}
+                  onOptionSelect={(_, data) => updateNodeProperty(node.id, 'value', data.optionValue)}
+                  size="small"
+                  placeholder="Select component type..."
+                >
+                  {allComponentTypes.map(type => (
+                    <Option key={type} value={type}>{type}</Option>
+                  ))}
+                </Dropdown>
+              ) : (
+                <Input
+                  value={node.value || ''}
+                  onChange={(_, data) => updateNodeProperty(node.id, 'value', data.value)}
+                  size="small"
+                  placeholder="Enter value..."
+                />
+              )}
             </div>
           )}
 
