@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using DataverseDevKit.Core.Abstractions;
 using DataverseDevKit.PluginHost.Contracts;
 using DataverseDevKit.PluginHost.Runtime;
+using DataverseDevKit.Core.Exceptions;
 using System.Text.Json;
 
 namespace DataverseDevKit.PluginHost.Services;
@@ -127,6 +128,27 @@ public sealed class PluginHostGrpcService : PluginHostService.PluginHostServiceB
             {
                 Success = true,
                 Result = resultBytes,
+                CorrelationId = request.CorrelationId
+            };
+        }
+        catch (SessionExpiredException ex)
+        {
+            _logger.LogWarning(ex, "Session expired during command execution: {Command}", request.CommandName);
+            
+            // Emit a session expired event so the host can notify the UI
+            var pluginContext = (PluginContextImpl)_pluginLoader.Context;
+            pluginContext.EmitEvent("session:expired", new
+            {
+                connectionId = ex.ConnectionId,
+                connectionName = ex.ConnectionName,
+                message = ex.Message
+            });
+            
+            return new ExecuteResponse
+            {
+                Success = false,
+                ErrorMessage = ex.Message,
+                ErrorCode = "SESSION_EXPIRED",
                 CorrelationId = request.CorrelationId
             };
         }

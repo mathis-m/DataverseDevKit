@@ -77,7 +77,7 @@ public class PluginLoader
         _logger.LogInformation("Initializing plugin: {PluginId}", pluginId);
 
         // Create context with provided logger and service client factory
-        _context = new PluginContextImpl(contextLogger, storagePath, serviceClientFactory);
+        _context = new PluginContextImpl(contextLogger, storagePath, pluginId, serviceClientFactory);
 
         // Initialize plugin
         await _plugin.InitializeAsync(_context, cancellationToken);

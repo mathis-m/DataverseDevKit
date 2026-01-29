@@ -76,6 +76,7 @@ message ExecuteResponse {
   bytes result = 2;
   string error_message = 3;
   string correlation_id = 4;
+  string error_code = 5;      // Optional error code (e.g., "SESSION_EXPIRED")
 }
 
 message SubscribeEventsRequest {

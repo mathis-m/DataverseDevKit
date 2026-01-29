@@ -34,16 +34,13 @@ public class TokenProviderGrpcService : TokenProviderHostService.TokenProviderHo
                 string.IsNullOrEmpty(request.ConnectionId) ? "(active)" : request.ConnectionId);
 
             var connectionId = string.IsNullOrEmpty(request.ConnectionId) ? null : request.ConnectionId;
-            var token = await _tokenProvider.GetAccessTokenAsync(connectionId, context.CancellationToken);
-
-            // Note: We don't have precise expiry info here, estimating 1 hour
-            var expiresAt = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds();
+            var result = await _tokenProvider.GetAccessTokenAsync(connectionId, context.CancellationToken);
 
             return new GetAccessTokenResponse
             {
                 Success = true,
-                AccessToken = token,
-                ExpiresAtUnix = expiresAt
+                AccessToken = result.AccessToken,
+                ExpiresAtUnix = result.ExpiresOn.ToUnixTimeSeconds()
             };
         }
         catch (InvalidOperationException ex)

@@ -9,6 +9,7 @@ import type {
   PluginEvent,
   AuthResult,
   AuthStatus,
+  SessionExpiredPayload,
 } from './types';
 
 export class HostBridge {
@@ -185,6 +186,24 @@ export class HostBridge {
 
   async getAuthStatus(): Promise<AuthStatus> {
     return this.sendRequest<AuthStatus>('auth.getStatus');
+  }
+
+  /**
+   * Reauthenticate a specific connection after session expiration.
+   * This will trigger an interactive OAuth flow.
+   */
+  async reauthenticate(connectionId: string): Promise<AuthResult> {
+    return this.sendRequest<AuthResult>('auth.reauthenticate', { connectionId });
+  }
+
+  /**
+   * Subscribe to session expired events and handle reauthentication.
+   * Returns an unsubscribe function.
+   */
+  onSessionExpired(callback: (payload: SessionExpiredPayload) => void): () => void {
+    return this.addEventListener('session:expired', (event) => {
+      callback(event.payload as SessionExpiredPayload);
+    });
   }
 
   // Plugin management

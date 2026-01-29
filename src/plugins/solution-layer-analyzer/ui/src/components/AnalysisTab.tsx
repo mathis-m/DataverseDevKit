@@ -63,7 +63,16 @@ interface AnalysisTabProps {
 export const AnalysisTab: React.FC<AnalysisTabProps> = ({ onNavigateToDiff }) => {
   const styles = useStyles();
   const { queryComponents, loading } = usePluginApi();
-  const { availableSolutions, analysisState, setAnalysisState, filterBarState } = useAppStore();
+  const { analysisState, setAnalysisState } = useAppStore();
+  // Use stable selectors - Zustand only re-renders if this specific value changes
+  const advancedFilter = useAppStore((state) => state.filterBarState.advancedFilter);
+  const availableSolutions = useAppStore((state) => state.availableSolutions);
+
+  // Memoize the solution names array to prevent unnecessary re-renders
+  const availableSolutionNames = useMemo(
+    () => availableSolutions.map(s => s.uniqueName),
+    [availableSolutions]
+  );
 
   // Extract state from store
   const {
@@ -75,19 +84,19 @@ export const AnalysisTab: React.FC<AnalysisTabProps> = ({ onNavigateToDiff }) =>
     groupBy,
   } = analysisState;
 
-  // Setters that update the store
-  const setAllComponents = (components: ComponentResult[]) => 
-    setAnalysisState({ allComponents: components });
-  const setFilteredComponents = (components: ComponentResult[]) => 
-    setAnalysisState({ filteredComponents: components });
-  const setSelectedComponent = (component: ComponentResult | null) => 
-    setAnalysisState({ selectedComponent: component });
-  const setViewMode = (mode: 'list' | 'visualizations') => 
-    setAnalysisState({ viewMode: mode });
-  const setVisualizationType = (type: 'sankey' | 'heatmap' | 'stacked' | 'network' | 'circle' | 'treemap') => 
-    setAnalysisState({ visualizationType: type });
-  const setGroupBy = (by: 'componentType' | 'table' | 'publisher' | 'solution' | 'managed') => 
-    setAnalysisState({ groupBy: by });
+  // Memoized setters that update the store (stable references)
+  const setAllComponents = useCallback((components: ComponentResult[]) => 
+    setAnalysisState({ allComponents: components }), [setAnalysisState]);
+  const setFilteredComponents = useCallback((components: ComponentResult[]) => 
+    setAnalysisState({ filteredComponents: components }), [setAnalysisState]);
+  const setSelectedComponent = useCallback((component: ComponentResult | null) => 
+    setAnalysisState({ selectedComponent: component }), [setAnalysisState]);
+  const setViewMode = useCallback((mode: 'list' | 'visualizations') => 
+    setAnalysisState({ viewMode: mode }), [setAnalysisState]);
+  const setVisualizationType = useCallback((type: 'sankey' | 'heatmap' | 'stacked' | 'network' | 'circle' | 'treemap') => 
+    setAnalysisState({ visualizationType: type }), [setAnalysisState]);
+  const setGroupBy = useCallback((by: 'componentType' | 'table' | 'publisher' | 'solution' | 'managed') => 
+    setAnalysisState({ groupBy: by }), [setAnalysisState]);
 
   const [fullscreenViz, setFullscreenViz] = useState<boolean>(false);
 
@@ -97,9 +106,11 @@ export const AnalysisTab: React.FC<AnalysisTabProps> = ({ onNavigateToDiff }) =>
     setFilteredComponents(components);
   }, [queryComponents, setAllComponents, setFilteredComponents]);
 
+  // Load components on mount and when advancedFilter changes
+  // Zustand guarantees stable references when the value hasn't changed
   React.useEffect(() => {
-    loadComponents(filterBarState.advancedFilter);
-  }, [loadComponents, filterBarState.advancedFilter]);
+    loadComponents(advancedFilter);
+  }, [advancedFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleFilterChange = useCallback((filtered: ComponentResult[]) => {
     setFilteredComponents(filtered);
@@ -144,7 +155,7 @@ export const AnalysisTab: React.FC<AnalysisTabProps> = ({ onNavigateToDiff }) =>
             <Button 
               appearance="primary" 
               icon={<FilterRegular />}
-              onClick={() => loadComponents(filterBarState.advancedFilter)}
+              onClick={() => loadComponents(advancedFilter)}
               disabled={loading.querying}
             >
               {loading.querying ? 'Loading...' : 'Refresh'}
@@ -178,7 +189,7 @@ export const AnalysisTab: React.FC<AnalysisTabProps> = ({ onNavigateToDiff }) =>
 
           <ComponentFilterBar
             components={allComponents}
-            availableSolutions={availableSolutions.map(s => s.uniqueName)}
+            availableSolutions={availableSolutionNames}
             onFilterChange={handleFilterChange}
             onAdvancedFilterChange={handleAdvancedFilterChange}
             loading={loading.querying}

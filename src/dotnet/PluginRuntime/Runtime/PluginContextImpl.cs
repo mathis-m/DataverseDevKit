@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using DataverseDevKit.Core.Abstractions;
 using DataverseDevKit.Core.Models;
+using System.Text.Json;
 
 namespace DataverseDevKit.PluginHost.Runtime;
 
@@ -9,15 +10,22 @@ namespace DataverseDevKit.PluginHost.Runtime;
 /// </summary>
 internal class PluginContextImpl : IPluginContext
 {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
     private readonly ILogger _logger;
     private readonly string _storagePath;
+    private readonly string _pluginId;
     private readonly List<PluginEvent> _events = new();
     private readonly IServiceClientFactory _serviceClientFactory;
 
-    public PluginContextImpl(ILogger logger, string storagePath, IServiceClientFactory serviceClientFactory)
+    public PluginContextImpl(ILogger logger, string storagePath, string pluginId, IServiceClientFactory serviceClientFactory)
     {
         _logger = logger;
         _storagePath = storagePath;
+        _pluginId = pluginId;
         _serviceClientFactory = serviceClientFactory;
         
         // Ensure storage directory exists
@@ -37,6 +45,22 @@ internal class PluginContextImpl : IPluginContext
     {
         _events.Add(@event);
         _logger.LogDebug("Event emitted: {EventType}", @event.Type);
+    }
+
+    /// <summary>
+    /// Convenience method to emit an event with automatic serialization and pluginId.
+    /// </summary>
+    public void EmitEvent(string eventType, object payload, Dictionary<string, string>? metadata = null)
+    {
+        var @event = new PluginEvent
+        {
+            PluginId = _pluginId,
+            Type = eventType,
+            Payload = JsonSerializer.Serialize(payload, JsonOptions),
+            Timestamp = DateTimeOffset.UtcNow,
+            Metadata = metadata
+        };
+        EmitEvent(@event);
     }
 
     public Task<string?> GetConfigAsync(string key, CancellationToken cancellationToken = default)

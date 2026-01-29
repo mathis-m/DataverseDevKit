@@ -17,6 +17,7 @@ import {
 import { useSettingsStore } from './stores/settings';
 import { usePluginStore } from './stores/plugins';
 import { TabPanel } from './components/TabPanel';
+import { SessionExpiredDialog } from './components/SessionExpiredDialog';
 
 const useStyles = makeStyles({
   root: {
@@ -134,6 +135,9 @@ const App: React.FC = () => {
           <TabPanel />
         </div>
       </div>
+      
+      {/* Global session expired dialog */}
+      <SessionExpiredDialog />
     </FluentProvider>
   );
 };

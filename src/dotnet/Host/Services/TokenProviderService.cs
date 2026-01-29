@@ -80,8 +80,8 @@ public sealed class TokenProviderService : IDisposable
     /// </summary>
     /// <param name="connectionId">The connection ID, or null for active connection.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>The access token.</returns>
-    public async Task<string> GetAccessTokenAsync(string? connectionId, CancellationToken ct = default)
+    /// <returns>The access token result with token and expiry.</returns>
+    public async Task<AccessTokenResult> GetAccessTokenAsync(string? connectionId, CancellationToken ct = default)
     {
         await EnsureInitializedAsync();
 
@@ -106,7 +106,11 @@ public sealed class TokenProviderService : IDisposable
             _logger.LogDebug("Token acquired silently for {ConnectionName}, expires: {Expiry}",
                 connection.Name, result.ExpiresOn);
 
-            return result.AccessToken;
+            return new AccessTokenResult
+            {
+                AccessToken = result.AccessToken,
+                ExpiresOn = result.ExpiresOn
+            };
         }
         catch (MsalUiRequiredException ex)
         {
@@ -336,4 +340,20 @@ public record AuthStatus
 {
     public bool IsAuthenticated { get; init; }
     public string? User { get; init; }
+}
+
+/// <summary>
+/// Result of a token acquisition.
+/// </summary>
+public record AccessTokenResult
+{
+    /// <summary>
+    /// The access token.
+    /// </summary>
+    public required string AccessToken { get; init; }
+    
+    /// <summary>
+    /// When the access token expires.
+    /// </summary>
+    public DateTimeOffset ExpiresOn { get; init; }
 }

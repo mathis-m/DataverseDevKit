@@ -91,6 +91,13 @@ export interface PluginEvent {
   metadata?: Record<string, unknown>;
 }
 
+/** Payload for session:expired event */
+export interface SessionExpiredPayload {
+  connectionId: string;
+  connectionName?: string;
+  message: string;
+}
+
 export type EventCallback = (event: PluginEvent) => void;
 
 // Settings types

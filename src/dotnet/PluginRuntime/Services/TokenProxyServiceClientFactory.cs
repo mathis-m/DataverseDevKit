@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Grpc.Net.Client;
 using DataverseDevKit.Core.Abstractions;
 using DataverseDevKit.PluginHost.Contracts;
+using DataverseDevKit.Core.Exceptions;
 
 namespace DataverseDevKit.PluginHost.Services;
 
@@ -144,6 +145,14 @@ public class TokenProxyServiceClientFactory : IServiceClientFactory, IAsyncDispo
         if (!response.Success)
         {
             _logger.LogError("Failed to get access token: {Error}", response.ErrorMessage);
+            
+            // Check if this is a session expired error
+            if (response.ErrorMessage.Contains("Session expired", StringComparison.OrdinalIgnoreCase) ||
+                response.ErrorMessage.Contains("Please login again", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SessionExpiredException(connectionId ?? _connectionId, connectionId ?? _connectionId);
+            }
+            
             throw new InvalidOperationException($"Failed to get access token: {response.ErrorMessage}");
         }
 

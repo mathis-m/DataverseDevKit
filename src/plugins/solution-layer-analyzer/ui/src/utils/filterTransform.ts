@@ -49,7 +49,7 @@ export function transformFilterForBackend(filter: FilterNode | null): BackendFil
 
   // Handle LAYER_QUERY - recursively transform the nested layer filter
   if (filter.type === 'LAYER_QUERY' && layerFilter) {
-    result.layerFilter = transformFilterForBackend(layerFilter);
+    result.layerFilter = transformFilterForBackend(layerFilter) ?? undefined;
   }
 
   if (filter.type === 'NOT') {

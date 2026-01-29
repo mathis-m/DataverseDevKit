@@ -215,14 +215,17 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
     const updateNode = (node: FilterNode): FilterNode => {
       if (node.id === nodeId && node.sequence) {
         const newSequence = [...node.sequence];
-        if (Array.isArray(newSequence[stepIndex])) {
-          if (!newSequence[stepIndex].includes(solution)) {
-            newSequence[stepIndex] = [...newSequence[stepIndex], solution];
+        const stepItem = newSequence[stepIndex];
+        if (Array.isArray(stepItem)) {
+          if (!stepItem.includes(solution)) {
+            newSequence[stepIndex] = [...stepItem, solution];
           }
+        } else if (typeof stepItem === 'string') {
+          // Convert single solution string to array
+          newSequence[stepIndex] = [stepItem, solution];
         } else {
-          // Convert single solution to array if needed
-          const existing = newSequence[stepIndex];
-          newSequence[stepIndex] = existing ? [existing, solution] : [solution];
+          // stepItem is SolutionQueryNode or undefined, start fresh array
+          newSequence[stepIndex] = [solution];
         }
         return { ...node, sequence: newSequence };
       }

@@ -140,28 +140,28 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
       const searchConditions: FilterNode[] = [
         {
           type: 'ATTRIBUTE',
-          id: `search-logical-${Date.now()}`,
+          id: 'search-logical',
           attribute: AttributeTarget.LogicalName,
           operator: StringOperator.Contains,
           value: searchText
         },
         {
           type: 'ATTRIBUTE',
-          id: `search-display-${Date.now()}`,
+          id: 'search-display',
           attribute: AttributeTarget.DisplayName,
           operator: StringOperator.Contains,
           value: searchText
         },
         {
           type: 'ATTRIBUTE',
-          id: `search-type-${Date.now()}`,
+          id: 'search-type',
           attribute: AttributeTarget.ComponentType,
           operator: StringOperator.Contains,
           value: searchText
         },
         {
           type: 'ATTRIBUTE',
-          id: `search-table-${Date.now()}`,
+          id: 'search-table',
           attribute: AttributeTarget.TableLogicalName,
           operator: StringOperator.Contains,
           value: searchText
@@ -169,7 +169,7 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
       ];
       conditions.push({
         type: 'OR',
-        id: `search-or-${Date.now()}`,
+        id: 'search-or',
         children: searchConditions
       });
     }
@@ -179,22 +179,22 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
       if (selectedTypes.length === 1) {
         conditions.push({
           type: 'ATTRIBUTE',
-          id: `type-${Date.now()}`,
+          id: 'type-single',
           attribute: AttributeTarget.ComponentType,
           operator: StringOperator.Equals,
           value: selectedTypes[0]
         });
       } else {
-        const typeConditions = selectedTypes.map(type => ({
+        const typeConditions = selectedTypes.map((type, idx) => ({
           type: 'ATTRIBUTE',
-          id: `type-${type}-${Date.now()}`,
+          id: `type-${idx}`,
           attribute: AttributeTarget.ComponentType,
           operator: StringOperator.Equals,
           value: type
         }));
         conditions.push({
           type: 'OR',
-          id: `type-or-${Date.now()}`,
+          id: 'type-or',
           children: typeConditions
         });
       }
@@ -204,7 +204,7 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
     if (selectedSolutions.length > 0) {
       conditions.push({
         type: 'HAS_ANY',
-        id: `solutions-${Date.now()}`,
+        id: 'solutions',
         solutions: selectedSolutions
       });
     }
@@ -214,7 +214,7 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
       // For now, we'll use MANAGED node which exists in backend
       conditions.push({
         type: 'MANAGED',
-        id: `managed-${Date.now()}`,
+        id: 'managed',
         // Note: The MANAGED node in backend expects isManaged boolean
         // This will need to be handled in the transform
         value: managedFilter === 'managed' ? 'true' : 'false'
@@ -229,7 +229,7 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
     } else {
       return {
         type: 'AND',
-        id: `root-${Date.now()}`,
+        id: 'root',
         children: conditions
       };
     }

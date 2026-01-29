@@ -72,8 +72,8 @@ export interface FilterNode {
   solutions?: string[];
   sequence?: (string | string[] | SolutionQueryNode)[];
   children?: FilterNode[];
-  // Component-level attribute filter properties
-  attribute?: AttributeTarget;
+  // Component-level attribute filter properties (AttributeTarget for ATTRIBUTE type, string for SOLUTION_QUERY)
+  attribute?: AttributeTarget | string;
   operator?: StringOperator;
   value?: string;
   // Nested query properties

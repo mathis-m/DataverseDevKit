@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { IndexStats, FilterNode, ComponentResult, GroupByOption } from '../types';
+import { IndexStats, FilterNode, ComponentResult } from '../types';
 
 export interface Solution {
   uniqueName: string;
