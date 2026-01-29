@@ -29,6 +29,7 @@ public class FilterEvaluator
             // Nested query filters
             LayerQueryFilterNode layerQuery => EvaluateLayerQuery(layerQuery, component),
             SolutionQueryFilterNode solutionQuery => EvaluateSolutionQueryFilter(solutionQuery, component),
+            LayerAttributeFilterNode layerAttribute => EvaluateLayerAttribute(layerAttribute, component),
             
             // Logical operators
             AndFilterNode and => EvaluateAnd(and, component),
@@ -254,5 +255,34 @@ public class FilterEvaluator
         // For now, we only support SchemaName attribute
         // The solutionName IS the schema name in our context
         return EvaluateStringOperator(query.Operator, solutionName, query.Value);
+    }
+
+    /// <summary>
+    /// Evaluates a layer attribute filter against a component.
+    /// Checks if any layer has an attribute matching the filter criteria.
+    /// </summary>
+    private bool EvaluateLayerAttribute(LayerAttributeFilterNode filter, Component component)
+    {
+        // Check if any layer has an attribute that matches
+        return component.Layers.Any(layer =>
+        {
+            // Find matching attributes by name
+            var matchingAttributes = layer.Attributes
+                .Where(a => a.AttributeName.Equals(filter.AttributeName, StringComparison.OrdinalIgnoreCase));
+
+            // If AttributeType is specified, filter by type as well
+            if (filter.AttributeType.HasValue)
+            {
+                matchingAttributes = matchingAttributes.Where(a => a.AttributeType == filter.AttributeType.Value);
+            }
+
+            // Check if any matching attribute satisfies the operator and value
+            return matchingAttributes.Any(attr =>
+            {
+                // Use the formatted AttributeValue for comparison (pre-formatted during indexing)
+                var attrValue = attr.AttributeValue ?? string.Empty;
+                return EvaluateStringOperator(filter.Operator, attrValue, filter.Value);
+            });
+        });
     }
 }

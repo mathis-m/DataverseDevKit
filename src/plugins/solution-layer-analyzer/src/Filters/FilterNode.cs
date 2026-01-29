@@ -14,6 +14,7 @@ namespace Ddk.SolutionLayerAnalyzer.Filters;
 // Nested query filters
 [JsonDerivedType(typeof(LayerQueryFilterNode), "LAYER_QUERY")]
 [JsonDerivedType(typeof(SolutionQueryFilterNode), "SOLUTION_QUERY")]
+[JsonDerivedType(typeof(LayerAttributeFilterNode), "LAYER_ATTRIBUTE")]
 // Logical operators
 [JsonDerivedType(typeof(AndFilterNode), "AND")]
 [JsonDerivedType(typeof(OrFilterNode), "OR")]
@@ -280,6 +281,39 @@ public sealed class SolutionQueryFilterNode : FilterNode
     /// </summary>
     [JsonPropertyName("value")]
     public string Value { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Layer attribute filter - filters layers based on extracted attributes.
+/// Used within LAYER_QUERY to filter by layer-specific attributes like CreatedOn, Publisher, etc.
+/// </summary>
+public sealed class LayerAttributeFilterNode : FilterNode
+{
+    /// <summary>
+    /// Gets or sets the attribute name to filter on (e.g., "formxml", "displayname", "createdon").
+    /// </summary>
+    [JsonPropertyName("attributeName")]
+    public string AttributeName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the string comparison operator.
+    /// </summary>
+    [JsonPropertyName("operator")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public StringOperator Operator { get; set; }
+
+    /// <summary>
+    /// Gets or sets the value to compare against.
+    /// </summary>
+    [JsonPropertyName("value")]
+    public string Value { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the expected attribute type (optional - for type-specific filtering).
+    /// </summary>
+    [JsonPropertyName("attributeType")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public Models.LayerAttributeType? AttributeType { get; set; }
 }
 
 /// <summary>
