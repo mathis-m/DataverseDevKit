@@ -22,7 +22,7 @@ export const loadRemoteModule = async (
   try {
     // Register the remote with vite-plugin-federation
     setRemote(scope, {
-      url: remoteEntry,
+      url: remoteEntry + `?t=${Date.now()}`, // Cache busting
       format: 'esm',
       from: 'vite',
     });

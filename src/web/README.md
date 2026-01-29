@@ -7,7 +7,7 @@ The Dataverse DevKit Shell UI is a modern, tab-based desktop application built w
 - **React 18** with TypeScript for UI development
 - **Vite** for fast development and building
 - **Module Federation** for dynamic plugin loading
-- **pnpm workspaces** for monorepo management
+- **pnpm workspaces** for monorepo management (from repository root)
 - **Zustand** for state management
 - **@fluentui/react-context-selector** for optimized context
 - **@dnd-kit/react** for drag-and-drop tab management
@@ -17,15 +17,21 @@ The Dataverse DevKit Shell UI is a modern, tab-based desktop application built w
 ### Monorepo Structure
 
 ```
-web/
-├── packages/               # Shared packages
-│   ├── host-sdk/          # TypeScript SDK for plugin developers
-│   └── ui-components/     # Shared FluentUI components
-├── apps/
-│   └── shell/             # Main Shell application
-└── plugins/
-    └── first-party/       # Built-in plugins
-        └── hello-world-ui/
+/ (repository root)
+├── pnpm-workspace.yaml      # Root workspace config
+├── package.json             # Root package with scripts
+└── src/
+    ├── web/                 # Core UI packages
+    │   ├── packages/        # Shared packages
+    │   │   ├── host-sdk/   # TypeScript SDK for plugin developers
+    │   │   └── ui-components/  # Shared FluentUI components
+    │   └── apps/
+    │       └── shell/       # Main Shell application
+    └── plugins/             # Plugin source code
+        ├── sample-plugin/
+        │   └── ui/         # Plugin UI
+        └── solution-layer-analyzer/
+            └── ui/         # Plugin UI
 ```
 
 ### Key Features
@@ -76,8 +82,8 @@ npm install -g pnpm@latest
 ### Installation
 
 ```powershell
-# Navigate to web directory
-cd web
+# Navigate to repository root
+cd /path/to/DataverseDevKit
 
 # Install all dependencies (workspaces)
 pnpm install
@@ -88,36 +94,25 @@ pnpm install
 #### Run Shell in Dev Mode
 
 ```powershell
-cd web
+# From repository root
 pnpm dev
 ```
 
 This starts the Shell at `http://localhost:5173` with hot module replacement.
 
-#### Run HelloWorld Plugin in Dev Mode
+#### Run a Plugin in Dev Mode
 
 ```powershell
-cd web/plugins/first-party/hello-world-ui
-pnpm dev
+# From repository root
+pnpm --filter @ddk/plugin-sla-ui dev
 ```
 
-This starts the plugin at `http://localhost:5174` for development testing.
-
-#### Run Both Concurrently
-
-```powershell
-# In web/ directory
-pnpm dev        # Shell on :5173
-# In another terminal
-cd plugins/first-party/hello-world-ui
-pnpm dev        # Plugin on :5174
-```
+This starts the plugin with hot module replacement for development testing.
 
 ### Building for Production
 
 ```powershell
-# Build all packages and apps
-cd web
+# Build all packages and apps (from repository root)
 pnpm build
 
 # Or build specific projects

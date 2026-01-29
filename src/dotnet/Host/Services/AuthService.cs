@@ -48,7 +48,7 @@ public class AuthService
     /// Gets an access token for the active connection.
     /// Used by plugins via the token proxy mechanism.
     /// </summary>
-    public async Task<string> GetAccessTokenAsync(string? connectionId = null)
+    public async Task<AccessTokenResult> GetAccessTokenAsync(string? connectionId = null)
     {
         return await _tokenProvider.GetAccessTokenAsync(connectionId);
     }

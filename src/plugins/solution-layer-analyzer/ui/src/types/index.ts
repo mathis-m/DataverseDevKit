@@ -40,13 +40,44 @@ export interface IndexStats {
   warnings?: string[];
 }
 
+export enum StringOperator {
+  Equals = 'Equals',
+  NotEquals = 'NotEquals',
+  Contains = 'Contains',
+  NotContains = 'NotContains',
+  BeginsWith = 'BeginsWith',
+  NotBeginsWith = 'NotBeginsWith',
+  EndsWith = 'EndsWith',
+  NotEndsWith = 'NotEndsWith'
+}
+
+export enum AttributeTarget {
+  LogicalName = 'LogicalName',
+  DisplayName = 'DisplayName',
+  ComponentType = 'ComponentType',
+  Publisher = 'Publisher',
+  TableLogicalName = 'TableLogicalName'
+}
+
+export interface SolutionQueryNode {
+  attribute: string;
+  operator: StringOperator;
+  value: string;
+}
+
 export interface FilterNode {
   type: string;
   id: string;
   solution?: string;
   solutions?: string[];
-  sequence?: (string | string[])[];
+  sequence?: (string | string[] | SolutionQueryNode)[];
   children?: FilterNode[];
+  // Component-level attribute filter properties (AttributeTarget for ATTRIBUTE type, string for SOLUTION_QUERY)
+  attribute?: AttributeTarget | string;
+  operator?: StringOperator;
+  value?: string;
+  // Nested query properties
+  layerFilter?: FilterNode; // For LAYER_QUERY
 }
 
 export interface IndexResponse {

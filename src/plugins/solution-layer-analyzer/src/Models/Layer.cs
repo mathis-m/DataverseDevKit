@@ -60,4 +60,9 @@ public sealed class Layer
     /// Navigation property to component.
     /// </summary>
     public Component Component { get; set; } = null!;
+
+    /// <summary>
+    /// Navigation property to extracted layer attributes.
+    /// </summary>
+    public List<LayerAttribute> Attributes { get; set; } = new();
 }

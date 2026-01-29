@@ -110,6 +110,7 @@ public class JsonRpcBridge
             "login" => await _authService.LoginAsync(GetParam<string>(paramsElement, "connectionId")),
             "logout" => await _authService.LogoutAsync(),
             "getStatus" => await _authService.GetStatusAsync(),
+            "reauthenticate" => await _authService.LoginAsync(GetParam<string>(paramsElement, "connectionId")),
             _ => throw new ArgumentException($"Unknown auth method: {method}")
         };
     }

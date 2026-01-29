@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   makeStyles,
   tokens,
@@ -31,6 +31,9 @@ import { LayerStackedBarChart } from '../visualizations/LayerStackedBarChart';
 import { LayerNetworkGraph } from '../visualizations/LayerNetworkGraph';
 import { LayerCirclePacking } from '../visualizations/LayerCirclePacking';
 import { LayerTreemap } from '../visualizations/LayerTreemap';
+import { useDebouncedValue } from '../hooks/useDebounce';
+
+const QUERY_DEBOUNCE_MS = 300;
 
 const useStyles = makeStyles({
   container: {
@@ -63,42 +66,87 @@ interface AnalysisTabProps {
 export const AnalysisTab: React.FC<AnalysisTabProps> = ({ onNavigateToDiff }) => {
   const styles = useStyles();
   const { queryComponents, loading } = usePluginApi();
-  const { availableSolutions } = useAppStore();
+  const { analysisState, setAnalysisState } = useAppStore();
+  // Use stable selectors - Zustand only re-renders if this specific value changes
+  const advancedFilter = useAppStore((state) => state.filterBarState.advancedFilter);
+  const availableSolutions = useAppStore((state) => state.availableSolutions);
 
-  const [allComponents, setAllComponents] = useState<ComponentResult[]>([]);
-  const [filteredComponents, setFilteredComponents] = useState<ComponentResult[]>([]);
-  const [selectedComponent, setSelectedComponent] = useState<ComponentResult | null>(null);
-  const [advancedFilter, setAdvancedFilter] = useState<FilterNode | null>(null);
-  const [viewMode, setViewMode] = useState<'list' | 'visualizations'>('list');
-  const [visualizationType, setVisualizationType] = useState<'sankey' | 'heatmap' | 'stacked' | 'network' | 'circle' | 'treemap'>('network');
-  const [groupBy, setGroupBy] = useState<GroupByOption>('componentType');
+  // Memoize the solution names array to prevent unnecessary re-renders
+  const availableSolutionNames = useMemo(
+    () => availableSolutions.map(s => s.uniqueName),
+    [availableSolutions]
+  );
+
+  // Extract state from store
+  const {
+    allComponents,
+    filteredComponents,
+    selectedComponent,
+    viewMode,
+    visualizationType,
+    groupBy,
+  } = analysisState;
+
+  // Memoized setters that update the store (stable references)
+  const setAllComponents = useCallback((components: ComponentResult[]) => 
+    setAnalysisState({ allComponents: components }), [setAnalysisState]);
+  const setFilteredComponents = useCallback((components: ComponentResult[]) => 
+    setAnalysisState({ filteredComponents: components }), [setAnalysisState]);
+  const setSelectedComponent = useCallback((component: ComponentResult | null) => 
+    setAnalysisState({ selectedComponent: component }), [setAnalysisState]);
+  const setViewMode = useCallback((mode: 'list' | 'visualizations') => 
+    setAnalysisState({ viewMode: mode }), [setAnalysisState]);
+  const setVisualizationType = useCallback((type: 'sankey' | 'heatmap' | 'stacked' | 'network' | 'circle' | 'treemap') => 
+    setAnalysisState({ visualizationType: type }), [setAnalysisState]);
+  const setGroupBy = useCallback((by: 'componentType' | 'table' | 'publisher' | 'solution' | 'managed') => 
+    setAnalysisState({ groupBy: by }), [setAnalysisState]);
+
   const [fullscreenViz, setFullscreenViz] = useState<boolean>(false);
 
   const loadComponents = useCallback(async (filter?: FilterNode | null) => {
+    console.log('[AnalysisTab] loadComponents called with filter:', JSON.stringify(filter, null, 2));
     const components = await queryComponents(filter);
     setAllComponents(components);
     setFilteredComponents(components);
-  }, [queryComponents]);
+  }, [queryComponents, setAllComponents, setFilteredComponents]);
 
-  React.useEffect(() => {
-    loadComponents(advancedFilter);
-  }, [loadComponents, advancedFilter]);
+  // Load components on mount and when advancedFilter changes
+  // Debounce the filter to prevent rapid re-queries during typing/editing
+  const advancedFilterJson = useMemo(() => 
+    advancedFilter ? JSON.stringify(advancedFilter) : null,
+    [advancedFilter]
+  );
+  
+  // Debounce the JSON representation to batch rapid filter changes
+  const debouncedFilterJson = useDebouncedValue(advancedFilterJson, QUERY_DEBOUNCE_MS);
+  
+  // Keep a ref to the current filter so we query with the latest when debounce fires
+  const advancedFilterRef = useRef(advancedFilter);
+  useEffect(() => {
+    advancedFilterRef.current = advancedFilter;
+  }, [advancedFilter]);
+  
+  useEffect(() => {
+    // Parse the debounced JSON to get the filter, or use the ref for latest
+    // The ref ensures we always query with the most recent filter value
+    loadComponents(advancedFilterRef.current);
+  }, [debouncedFilterJson]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleFilterChange = useCallback((filtered: ComponentResult[]) => {
     setFilteredComponents(filtered);
-  }, []);
+  }, [setFilteredComponents]);
 
-  const handleAdvancedFilterChange = useCallback((filter: FilterNode | null) => {
-    setAdvancedFilter(filter);
+  const handleAdvancedFilterChange = useCallback((_filter: FilterNode | null) => {
+    // This is now handled via the store through ComponentFilterBar
   }, []);
 
   const handleSelectComponent = useCallback((component: ComponentResult) => {
     setSelectedComponent(component);
-  }, []);
+  }, [setSelectedComponent]);
 
   const handleCloseDetail = useCallback(() => {
     setSelectedComponent(null);
-  }, []);
+  }, [setSelectedComponent]);
 
   const handleDiff = useCallback((leftSolution: string, rightSolution: string) => {
     if (selectedComponent) {
@@ -161,7 +209,7 @@ export const AnalysisTab: React.FC<AnalysisTabProps> = ({ onNavigateToDiff }) =>
 
           <ComponentFilterBar
             components={allComponents}
-            availableSolutions={availableSolutions.map(s => s.uniqueName)}
+            availableSolutions={availableSolutionNames}
             onFilterChange={handleFilterChange}
             onAdvancedFilterChange={handleAdvancedFilterChange}
             loading={loading.querying}

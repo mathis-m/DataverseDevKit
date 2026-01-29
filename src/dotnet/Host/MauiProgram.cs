@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using DataverseDevKit.Host.Bridge;
+using DataverseDevKit.Host.Platforms.Windows;
 using DataverseDevKit.Host.Services;
 
 namespace DataverseDevKit.Host;
@@ -18,6 +19,10 @@ public static class MauiProgram
                 fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold");
             });
 
+        builder.ConfigureMauiHandlers(handlers =>
+        {
+            handlers.AddHandler<HybridWebView, CustomHybridWebViewHandler>();
+        });
 
         // Register App for DI (it has constructor dependencies)
         builder.Services.AddSingleton<App>();

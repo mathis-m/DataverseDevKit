@@ -50,6 +50,11 @@ public sealed class AnalyzerDbContext : DbContext
     public DbSet<ComponentNameCache> ComponentNameCache => Set<ComponentNameCache>();
 
     /// <summary>
+    /// Gets or sets the LayerAttributes table.
+    /// </summary>
+    public DbSet<LayerAttribute> LayerAttributes => Set<LayerAttribute>();
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="AnalyzerDbContext"/> class.
     /// </summary>
     public AnalyzerDbContext()
@@ -111,6 +116,20 @@ public sealed class AnalyzerDbContext : DbContext
             entity.HasKey(e => e.LayerId);
             entity.HasIndex(e => new { e.ComponentId, e.Ordinal });
             entity.HasIndex(e => e.SolutionId);
+            entity.HasMany(e => e.Attributes)
+                  .WithOne(e => e.Layer)
+                  .HasForeignKey(e => e.LayerId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Configure LayerAttribute entity
+        modelBuilder.Entity<LayerAttribute>(entity =>
+        {
+            entity.HasKey(e => e.AttributeId);
+            entity.HasIndex(e => e.LayerId);
+            entity.HasIndex(e => e.AttributeName);
+            entity.HasIndex(e => new { e.LayerId, e.AttributeName });
+            entity.HasIndex(e => e.AttributeType);
         });
 
         // Configure Artifact entity
