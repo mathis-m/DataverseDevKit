@@ -23,6 +23,7 @@ public class IndexingService
     private readonly ServiceClient _serviceClient;
     private readonly IPluginContext _pluginContext;
     private readonly ComponentNameResolver _nameResolver;
+    private readonly LayerAttributeExtractor _attributeExtractor;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -40,6 +41,10 @@ public class IndexingService
         _serviceClient = serviceClient;
         _pluginContext = pluginContext;
         _nameResolver = new ComponentNameResolver(dbContextOptions, logger, serviceClient);
+        
+        // Initialize attribute extractor with payload service for formatting
+        var payloadService = new PayloadService(serviceClient, logger);
+        _attributeExtractor = new LayerAttributeExtractor(logger, payloadService);
     }
 
     public async Task<IndexResponse> StartIndexAsync(IndexRequest request, CancellationToken cancellationToken)
@@ -487,6 +492,20 @@ public class IndexingService
                                 layer.IsManaged = solution.IsManaged;
                                 layer.Version = solution.Version;
                                 layer.Publisher = solution.Publisher;
+                            }
+
+                            // Extract and format layer attributes
+                            try
+                            {
+                                var extractedAttributes = _attributeExtractor.ExtractAttributes(layer.LayerId, componentJson);
+                                layer.Attributes = extractedAttributes;
+                                
+                                _logger.LogDebug("Extracted {Count} attributes for layer {LayerId}", 
+                                    extractedAttributes.Count, layer.LayerId);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to extract attributes for layer {LayerId}", layer.LayerId);
                             }
 
                             allLayers.Add(layer);
