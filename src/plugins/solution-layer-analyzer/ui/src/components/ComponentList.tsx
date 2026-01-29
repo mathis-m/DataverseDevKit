@@ -1,4 +1,5 @@
 import React from 'react';
+import { FixedSizeList as List, ListChildComponentProps } from 'react-window';
 import {
   makeStyles,
   tokens,
@@ -12,6 +13,7 @@ import {
   Button,
   Text,
   Card,
+  useApplyScrollbarWidth,
 } from '@fluentui/react-components';
 import {
   ChevronRightRegular,
@@ -21,8 +23,6 @@ import { ComponentResult } from '../types';
 
 const useStyles = makeStyles({
   tableContainer: {
-    maxHeight: '500px',
-    overflowY: 'auto',
     border: `1px solid ${tokens.colorNeutralStroke1}`,
     borderRadius: tokens.borderRadiusMedium,
   },
@@ -50,12 +50,97 @@ interface ComponentListProps {
   selectedComponentId?: string | null;
 }
 
+interface VirtualizedRowProps extends ListChildComponentProps {
+  data: {
+    components: ComponentResult[];
+    onSelectComponent: (component: ComponentResult) => void;
+    selectedComponentId?: string | null;
+    styles: ReturnType<typeof useStyles>;
+  };
+}
+
+const VirtualizedRow: React.FC<VirtualizedRowProps> = ({ index, style, data }) => {
+  const { components, onSelectComponent, selectedComponentId, styles } = data;
+  const component = components[index];
+
+  return (
+    <TableRow 
+      aria-rowindex={index + 2}
+      key={component.componentId}
+      className={styles.clickableRow}
+      onClick={() => onSelectComponent(component)}
+      style={{
+        ...style,
+        backgroundColor: selectedComponentId === component.componentId 
+          ? tokens.colorNeutralBackground1Selected 
+          : undefined,
+      }}
+    >
+      <TableCell>
+        <Badge appearance="outline" color="informative">
+          {component.componentType}
+        </Badge>
+      </TableCell>
+      <TableCell>
+        <div>
+          <Text weight="semibold">{component.displayName || component.logicalName}</Text>
+          {component.displayName && (
+            <Text size={200} style={{ display: 'block', color: tokens.colorNeutralForeground3 }}>
+              {component.logicalName}
+            </Text>
+          )}
+        </div>
+      </TableCell>
+      <TableCell>
+        <Text>{component.displayName ? '-' : ''}</Text>
+      </TableCell>
+      <TableCell>
+        <Text size={200}>{component.tableLogicalName || '-'}</Text>
+      </TableCell>
+      <TableCell>
+        <div className={styles.layerBadges}>
+          {component.layerSequence.map((solution, i) => (
+            <Badge 
+              key={i} 
+              appearance="filled"
+              color={i === 0 ? 'success' : i === component.layerSequence.length - 1 ? 'danger' : 'warning'}
+              size="small"
+            >
+              {i + 1}. {solution}
+            </Badge>
+          ))}
+        </div>
+      </TableCell>
+      <TableCell>
+        <Badge appearance={component.isManaged ? 'filled' : 'outline'}>
+          {component.isManaged ? 'Yes' : 'No'}
+        </Badge>
+      </TableCell>
+      <TableCell>
+        <Text size={200}>{component.publisher || '-'}</Text>
+      </TableCell>
+      <TableCell>
+        <Button
+          size="small"
+          appearance="subtle"
+          icon={<ChevronRightRegular />}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelectComponent(component);
+          }}
+        />
+      </TableCell>
+    </TableRow>
+  );
+};
+
 export const ComponentList: React.FC<ComponentListProps> = ({
   components,
   onSelectComponent,
   selectedComponentId,
 }) => {
   const styles = useStyles();
+  const appliedScrollbarWidthRef = useApplyScrollbarWidth();
 
   if (components.length === 0) {
     return (
@@ -69,11 +154,23 @@ export const ComponentList: React.FC<ComponentListProps> = ({
     );
   }
 
+  const itemData = {
+    components,
+    onSelectComponent,
+    selectedComponentId,
+    styles,
+  };
+
   return (
     <div className={styles.tableContainer}>
-      <Table size="small">
+      <Table
+        noNativeElements
+        aria-label="Components table"
+        aria-rowcount={components.length}
+        size="small"
+      >
         <TableHeader>
-          <TableRow>
+          <TableRow aria-rowindex={1}>
             <TableHeaderCell>Type</TableHeaderCell>
             <TableHeaderCell>Logical Name</TableHeaderCell>
             <TableHeaderCell>Display Name</TableHeaderCell>
@@ -82,76 +179,20 @@ export const ComponentList: React.FC<ComponentListProps> = ({
             <TableHeaderCell>Managed</TableHeaderCell>
             <TableHeaderCell>Publisher</TableHeaderCell>
             <TableHeaderCell></TableHeaderCell>
+            {/* Scrollbar alignment for the header */}
+            <div role="presentation" ref={appliedScrollbarWidthRef} />
           </TableRow>
         </TableHeader>
         <TableBody>
-          {components.map((component) => (
-            <TableRow 
-              key={component.componentId}
-              className={styles.clickableRow}
-              onClick={() => onSelectComponent(component)}
-              style={{
-                backgroundColor: selectedComponentId === component.componentId 
-                  ? tokens.colorNeutralBackground1Selected 
-                  : undefined,
-              }}
-            >
-              <TableCell>
-                <Badge appearance="outline" color="informative">
-                  {component.componentType}
-                </Badge>
-              </TableCell>
-              <TableCell>
-                <div>
-                  <Text weight="semibold">{component.displayName || component.logicalName}</Text>
-                  {component.displayName && (
-                    <Text size={200} style={{ display: 'block', color: tokens.colorNeutralForeground3 }}>
-                      {component.logicalName}
-                    </Text>
-                  )}
-                </div>
-              </TableCell>
-              <TableCell>
-                <Text>{component.displayName ? '-' : ''}</Text>
-              </TableCell>
-              <TableCell>
-                <Text size={200}>{component.tableLogicalName || '-'}</Text>
-              </TableCell>
-              <TableCell>
-                <div className={styles.layerBadges}>
-                  {component.layerSequence.map((solution, i) => (
-                    <Badge 
-                      key={i} 
-                      appearance="filled"
-                      color={i === 0 ? 'success' : i === component.layerSequence.length - 1 ? 'danger' : 'warning'}
-                      size="small"
-                    >
-                      {i + 1}. {solution}
-                    </Badge>
-                  ))}
-                </div>
-              </TableCell>
-              <TableCell>
-                <Badge appearance={component.isManaged ? 'filled' : 'outline'}>
-                  {component.isManaged ? 'Yes' : 'No'}
-                </Badge>
-              </TableCell>
-              <TableCell>
-                <Text size={200}>{component.publisher || '-'}</Text>
-              </TableCell>
-              <TableCell>
-                <Button
-                  size="small"
-                  appearance="subtle"
-                  icon={<ChevronRightRegular />}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSelectComponent(component);
-                  }}
-                />
-              </TableCell>
-            </TableRow>
-          ))}
+          <List
+            height={500}
+            itemCount={components.length}
+            itemSize={70}
+            width="100%"
+            itemData={itemData}
+          >
+            {VirtualizedRow}
+          </List>
         </TableBody>
       </Table>
     </div>
