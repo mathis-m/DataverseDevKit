@@ -6,21 +6,33 @@ namespace Ddk.SolutionLayerAnalyzer.Filters;
 /// Base class for filter AST nodes.
 /// </summary>
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
+// Component-level filters (top level)
+[JsonDerivedType(typeof(AttributeFilterNode), "ATTRIBUTE")]
+[JsonDerivedType(typeof(ComponentTypeFilterNode), "COMPONENT_TYPE")]
+[JsonDerivedType(typeof(ManagedFilterNode), "MANAGED")]
+[JsonDerivedType(typeof(PublisherFilterNode), "PUBLISHER")]
+// Nested query filters
+[JsonDerivedType(typeof(LayerQueryFilterNode), "LAYER_QUERY")]
+[JsonDerivedType(typeof(SolutionQueryFilterNode), "SOLUTION_QUERY")]
+// Logical operators
+[JsonDerivedType(typeof(AndFilterNode), "AND")]
+[JsonDerivedType(typeof(OrFilterNode), "OR")]
+[JsonDerivedType(typeof(NotFilterNode), "NOT")]
+// Legacy filters (for backward compatibility - map to LayerQuery internally)
 [JsonDerivedType(typeof(HasFilterNode), "HAS")]
 [JsonDerivedType(typeof(HasAnyFilterNode), "HAS_ANY")]
 [JsonDerivedType(typeof(HasAllFilterNode), "HAS_ALL")]
 [JsonDerivedType(typeof(HasNoneFilterNode), "HAS_NONE")]
 [JsonDerivedType(typeof(OrderStrictFilterNode), "ORDER_STRICT")]
 [JsonDerivedType(typeof(OrderFlexFilterNode), "ORDER_FLEX")]
-[JsonDerivedType(typeof(AndFilterNode), "AND")]
-[JsonDerivedType(typeof(OrFilterNode), "OR")]
-[JsonDerivedType(typeof(NotFilterNode), "NOT")]
-[JsonDerivedType(typeof(ComponentTypeFilterNode), "COMPONENT_TYPE")]
-[JsonDerivedType(typeof(ManagedFilterNode), "MANAGED")]
-[JsonDerivedType(typeof(PublisherFilterNode), "PUBLISHER")]
-[JsonDerivedType(typeof(AttributeFilterNode), "ATTRIBUTE")]
-[JsonDerivedType(typeof(SolutionQueryNode), "SOLUTION_QUERY")]
 public abstract class FilterNode
+{
+}
+
+/// <summary>
+/// Base class for layer filter nodes (used within LayerQuery).
+/// </summary>
+public abstract class LayerFilterNode
 {
 }
 
@@ -205,6 +217,7 @@ public sealed class PublisherFilterNode : FilterNode
 
 /// <summary>
 /// Attribute-based filter with string operators.
+/// Operates on component-level attributes.
 /// </summary>
 public sealed class AttributeFilterNode : FilterNode
 {
@@ -230,8 +243,48 @@ public sealed class AttributeFilterNode : FilterNode
 }
 
 /// <summary>
-/// Represents a dynamic solution query for use in ORDER nodes.
-/// Allows filtering solutions based on their schema name or other properties.
+/// Layer query filter - wraps filters that operate on component layers.
+/// This is the primary way to filter based on solutions and layer ordering.
+/// </summary>
+public sealed class LayerQueryFilterNode : FilterNode
+{
+    /// <summary>
+    /// Gets or sets the layer filter to apply.
+    /// Can be HAS, HAS_ANY, ORDER_FLEX, etc.
+    /// </summary>
+    [JsonPropertyName("layerFilter")]
+    public FilterNode? LayerFilter { get; set; }
+}
+
+/// <summary>
+/// Solution query filter - wraps filters that match solutions dynamically.
+/// Used within layer queries to select solutions based on attributes.
+/// </summary>
+public sealed class SolutionQueryFilterNode : FilterNode
+{
+    /// <summary>
+    /// Gets or sets the attribute to filter on (typically SchemaName, UniqueName).
+    /// </summary>
+    [JsonPropertyName("attribute")]
+    public string Attribute { get; set; } = "SchemaName";
+
+    /// <summary>
+    /// Gets or sets the string comparison operator.
+    /// </summary>
+    [JsonPropertyName("operator")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public StringOperator Operator { get; set; }
+
+    /// <summary>
+    /// Gets or sets the value to compare against.
+    /// </summary>
+    [JsonPropertyName("value")]
+    public string Value { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Legacy SolutionQueryNode for backward compatibility.
+/// Used in ORDER node sequences. Consider migrating to SolutionQueryFilterNode.
 /// </summary>
 public sealed class SolutionQueryNode
 {

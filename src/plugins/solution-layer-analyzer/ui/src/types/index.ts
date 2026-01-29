@@ -72,10 +72,12 @@ export interface FilterNode {
   solutions?: string[];
   sequence?: (string | string[] | SolutionQueryNode)[];
   children?: FilterNode[];
-  // New attribute filter properties
+  // Component-level attribute filter properties
   attribute?: AttributeTarget;
   operator?: StringOperator;
   value?: string;
+  // Nested query properties
+  layerFilter?: FilterNode; // For LAYER_QUERY
 }
 
 export interface IndexResponse {

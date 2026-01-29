@@ -6,6 +6,7 @@ import { FilterNode, SolutionQueryNode, AttributeTarget, StringOperator } from '
  * - No `id` property (UI-only concern)
  * - `NOT` nodes use `child` (singular) instead of `children` (array)
  * - Includes new filter types: attribute, operator, value for ATTRIBUTE filters
+ * - Includes layerFilter for LAYER_QUERY
  */
 export interface BackendFilterNode {
   type: string;
@@ -15,11 +16,13 @@ export interface BackendFilterNode {
   children?: BackendFilterNode[];
   child?: BackendFilterNode;
   // ATTRIBUTE filter properties
-  attribute?: AttributeTarget;
+  attribute?: AttributeTarget | string;
   operator?: StringOperator;
   value?: string;
   // MANAGED filter property
   isManaged?: boolean;
+  // LAYER_QUERY property
+  layerFilter?: BackendFilterNode;
 }
 
 /**
@@ -27,13 +30,14 @@ export interface BackendFilterNode {
  * - Removes the `id` property
  * - Converts NOT nodes from `children` array to `child` singular
  * - Handles MANAGED filter conversion (value string to isManaged boolean)
+ * - Recursively transforms nested filters (e.g., layerFilter in LAYER_QUERY)
  */
 export function transformFilterForBackend(filter: FilterNode | null): BackendFilterNode | null {
   if (!filter) {
     return null;
   }
 
-  const { id, children, ...rest } = filter;
+  const { id, children, layerFilter, ...rest } = filter;
 
   const result: BackendFilterNode = { ...rest };
 
@@ -41,6 +45,11 @@ export function transformFilterForBackend(filter: FilterNode | null): BackendFil
   if (filter.type === 'MANAGED' && filter.value) {
     result.isManaged = filter.value === 'true';
     delete result.value;
+  }
+
+  // Handle LAYER_QUERY - recursively transform the nested layer filter
+  if (filter.type === 'LAYER_QUERY' && layerFilter) {
+    result.layerFilter = transformFilterForBackend(layerFilter);
   }
 
   if (filter.type === 'NOT') {

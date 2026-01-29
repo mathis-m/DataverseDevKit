@@ -20,21 +20,44 @@ public class FilterEvaluator
 
         return filter switch
         {
+            // Component-level filters
+            AttributeFilterNode attribute => EvaluateAttribute(attribute, component),
+            ComponentTypeFilterNode componentType => EvaluateComponentType(componentType, component),
+            ManagedFilterNode managed => EvaluateManaged(managed, component),
+            PublisherFilterNode publisher => EvaluatePublisher(publisher, component),
+            
+            // Nested query filters
+            LayerQueryFilterNode layerQuery => EvaluateLayerQuery(layerQuery, component),
+            SolutionQueryFilterNode solutionQuery => EvaluateSolutionQueryFilter(solutionQuery, component),
+            
+            // Logical operators
+            AndFilterNode and => EvaluateAnd(and, component),
+            OrFilterNode or => EvaluateOr(or, component),
+            NotFilterNode not => EvaluateNot(not, component),
+            
+            // Legacy layer filters (for backward compatibility)
             HasFilterNode has => EvaluateHas(has, component),
             HasAnyFilterNode hasAny => EvaluateHasAny(hasAny, component),
             HasAllFilterNode hasAll => EvaluateHasAll(hasAll, component),
             HasNoneFilterNode hasNone => EvaluateHasNone(hasNone, component),
             OrderStrictFilterNode orderStrict => EvaluateOrderStrict(orderStrict, component),
             OrderFlexFilterNode orderFlex => EvaluateOrderFlex(orderFlex, component),
-            AndFilterNode and => EvaluateAnd(and, component),
-            OrFilterNode or => EvaluateOr(or, component),
-            NotFilterNode not => EvaluateNot(not, component),
-            ComponentTypeFilterNode componentType => EvaluateComponentType(componentType, component),
-            ManagedFilterNode managed => EvaluateManaged(managed, component),
-            PublisherFilterNode publisher => EvaluatePublisher(publisher, component),
-            AttributeFilterNode attribute => EvaluateAttribute(attribute, component),
+            
             _ => true
         };
+    }
+
+    private bool EvaluateLayerQuery(LayerQueryFilterNode filter, Component component)
+    {
+        // LayerQuery wraps a layer filter - evaluate the nested filter
+        return filter.LayerFilter != null ? Evaluate(filter.LayerFilter, component) : true;
+    }
+
+    private bool EvaluateSolutionQueryFilter(SolutionQueryFilterNode filter, Component component)
+    {
+        // Solution query filter - check if any layer's solution matches the query
+        return component.Layers.Any(layer =>
+            EvaluateStringOperator(filter.Operator, layer.SolutionName, filter.Value));
     }
 
     private bool EvaluateHas(HasFilterNode filter, Component component)

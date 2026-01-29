@@ -138,6 +138,18 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
         operator: StringOperator.Contains,
         value: ''
       }),
+      ...(childType === 'LAYER_QUERY' && { 
+        layerFilter: {
+          type: 'HAS',
+          id: `layer-${Date.now()}-${Math.random()}`,
+          solution: solutions[0] || ''
+        }
+      }),
+      ...(childType === 'SOLUTION_QUERY' && { 
+        attribute: 'SchemaName',
+        operator: StringOperator.BeginsWith,
+        value: ''
+      }),
       ...(['AND', 'OR', 'NOT'].includes(childType) && { children: [] }),
     };
 
@@ -459,13 +471,19 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
                   }}
                   size="small"
                 >
-                  <Option value="HAS">HAS (has solution)</Option>
-                  <Option value="HAS_ANY">HAS_ANY (has any of solutions)</Option>
-                  <Option value="HAS_ALL">HAS_ALL (has all solutions)</Option>
-                  <Option value="HAS_NONE">HAS_NONE (has none of solutions)</Option>
-                  <Option value="ORDER_STRICT">ORDER_STRICT (strict sequence)</Option>
-                  <Option value="ORDER_FLEX">ORDER_FLEX (flexible sequence)</Option>
-                  <Option value="ATTRIBUTE">ATTRIBUTE (filter by attribute)</Option>
+                  {/* Component-level filters */}
+                  <Option value="ATTRIBUTE">ATTRIBUTE (filter by component attribute)</Option>
+                  {/* Nested query filters */}
+                  <Option value="LAYER_QUERY">LAYER_QUERY (query layers/solutions)</Option>
+                  <Option value="SOLUTION_QUERY">SOLUTION_QUERY (match solution by name)</Option>
+                  {/* Legacy layer filters (for backward compatibility) */}
+                  <Option value="HAS">HAS (has solution) [Legacy]</Option>
+                  <Option value="HAS_ANY">HAS_ANY (has any of solutions) [Legacy]</Option>
+                  <Option value="HAS_ALL">HAS_ALL (has all solutions) [Legacy]</Option>
+                  <Option value="HAS_NONE">HAS_NONE (has none of solutions) [Legacy]</Option>
+                  <Option value="ORDER_STRICT">ORDER_STRICT (strict sequence) [Legacy]</Option>
+                  <Option value="ORDER_FLEX">ORDER_FLEX (flexible sequence) [Legacy]</Option>
+                  {/* Logical operators */}
                   <Option value="AND">AND</Option>
                   <Option value="OR">OR</Option>
                   <Option value="NOT">NOT</Option>
@@ -559,6 +577,57 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
               <Dropdown
                 value={node.operator || StringOperator.Contains}
                 selectedOptions={node.operator ? [node.operator] : [StringOperator.Contains]}
+                onOptionSelect={(_, data) => updateNodeProperty(node.id, 'operator', data.optionValue)}
+                size="small"
+              >
+                <Option value={StringOperator.Equals}>Equals</Option>
+                <Option value={StringOperator.NotEquals}>Not Equals</Option>
+                <Option value={StringOperator.Contains}>Contains</Option>
+                <Option value={StringOperator.NotContains}>Not Contains</Option>
+                <Option value={StringOperator.BeginsWith}>Begins With</Option>
+                <Option value={StringOperator.NotBeginsWith}>Not Begins With</Option>
+                <Option value={StringOperator.EndsWith}>Ends With</Option>
+                <Option value={StringOperator.NotEndsWith}>Not Ends With</Option>
+              </Dropdown>
+
+              <Label size="small">Value:</Label>
+              <Input
+                value={node.value || ''}
+                onChange={(_, data) => updateNodeProperty(node.id, 'value', data.value)}
+                size="small"
+                placeholder="Enter value..."
+              />
+            </div>
+          )}
+
+          {/* LAYER_QUERY filter */}
+          {node.type === 'LAYER_QUERY' && (
+            <div style={{ marginLeft: tokens.spacingHorizontalL }}>
+              <Text size={200} style={{ marginBottom: tokens.spacingVerticalS, display: 'block' }}>
+                Layer Filter (nested):
+              </Text>
+              {node.layerFilter && renderNode(node.layerFilter, depth + 1)}
+              {!node.layerFilter && (
+                <Text size={200} italic>No layer filter set</Text>
+              )}
+            </div>
+          )}
+
+          {/* SOLUTION_QUERY filter */}
+          {node.type === 'SOLUTION_QUERY' && (
+            <div className={styles.inline}>
+              <Label size="small">Attribute:</Label>
+              <Input
+                value={node.attribute || 'SchemaName'}
+                onChange={(_, data) => updateNodeProperty(node.id, 'attribute', data.value)}
+                size="small"
+                placeholder="SchemaName"
+              />
+
+              <Label size="small">Operator:</Label>
+              <Dropdown
+                value={node.operator || StringOperator.BeginsWith}
+                selectedOptions={node.operator ? [node.operator] : [StringOperator.BeginsWith]}
                 onOptionSelect={(_, data) => updateNodeProperty(node.id, 'operator', data.optionValue)}
                 size="small"
               >
