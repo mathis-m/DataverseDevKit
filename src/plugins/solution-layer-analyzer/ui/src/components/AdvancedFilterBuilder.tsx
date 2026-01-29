@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   makeStyles,
   tokens,
@@ -100,28 +100,64 @@ const useStyles = makeStyles({
 
 interface AdvancedFilterBuilderProps {
   solutions: string[];
+  initialFilter?: FilterNode | null;
   onFilterChange: (filter: FilterNode | null) => void;
 }
 
 export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
   solutions,
+  initialFilter,
   onFilterChange,
 }) => {
   const styles = useStyles();
   
-  const [rootFilter, setRootFilter] = useState<FilterNode>({
-    type: 'AND',
-    id: 'root',
-    children: [],
+  // Initialize with the provided filter or create a new empty AND root
+  const [rootFilter, setRootFilter] = useState<FilterNode>(() => {
+    if (initialFilter && initialFilter.type === 'AND' && initialFilter.children) {
+      // Use the existing filter structure, ensuring it has an id
+      return {
+        ...initialFilter,
+        id: initialFilter.id || 'root',
+      };
+    }
+    return {
+      type: 'AND',
+      id: 'root',
+      children: [],
+    };
   });
+
+  // Track if we're in the initial mount phase
+  const isInitialMount = useRef(true);
+  
+  // Stable callback ref to avoid closure issues
+  const onFilterChangeRef = useRef(onFilterChange);
+  useEffect(() => {
+    onFilterChangeRef.current = onFilterChange;
+  }, [onFilterChange]);
+
+  // Sync filter changes to parent via useEffect
+  // This ensures changes are always propagated regardless of how rootFilter is updated
+  useEffect(() => {
+    // Skip the initial mount - only sync subsequent changes
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    
+    const filterToSend = rootFilter.children && rootFilter.children.length > 0 ? rootFilter : null;
+    console.log('[AdvancedFilterBuilder] Syncing filter to parent:', JSON.stringify(filterToSend, null, 2));
+    onFilterChangeRef.current(filterToSend);
+  }, [rootFilter]);
 
   // Track selected filter type for each node that can have children
   const [selectedFilterTypes, setSelectedFilterTypes] = useState<Record<string, string>>({});
 
-  const updateFilter = (updatedFilter: FilterNode) => {
+  // Internal update function that just updates local state
+  // The useEffect above handles propagation to parent
+  const updateFilter = useCallback((updatedFilter: FilterNode) => {
     setRootFilter(updatedFilter);
-    onFilterChange(updatedFilter.children && updatedFilter.children.length > 0 ? updatedFilter : null);
-  };
+  }, []);
 
   const addChild = (parentId: string, childType: string) => {
     const newChild: FilterNode = {

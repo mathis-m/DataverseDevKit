@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect } from 'react';
+import React, { useMemo, useEffect, useState, useRef, useCallback } from 'react';
 import {
   makeStyles,
   tokens,
@@ -18,6 +18,9 @@ import {
 import { ComponentResult, FilterNode, AttributeTarget, StringOperator } from '../types';
 import { AdvancedFilterBuilder } from './AdvancedFilterBuilder';
 import { useAppStore } from '../store/useAppStore';
+import { useDebouncedValue } from '../hooks/useDebounce';
+
+const FILTER_DEBOUNCE_MS = 300;
 
 const useStyles = makeStyles({
   filterBar: {
@@ -58,24 +61,59 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
 }) => {
   const styles = useStyles();
   
-  // Use store for filter state
+  // Use store for persisted filter state
   const { filterBarState, setFilterBarState } = useAppStore();
   const {
-    searchText,
-    selectedTypes,
-    selectedSolutions,
-    managedFilter,
     advancedMode,
     advancedFilter,
   } = filterBarState;
 
-  // Setters that update the store
-  const setSearchText = (value: string) => setFilterBarState({ searchText: value });
-  const setSelectedTypes = (value: string[]) => setFilterBarState({ selectedTypes: value });
-  const setSelectedSolutions = (value: string[]) => setFilterBarState({ selectedSolutions: value });
-  const setManagedFilter = (value: string) => setFilterBarState({ managedFilter: value });
-  const setAdvancedMode = (value: boolean) => setFilterBarState({ advancedMode: value });
-  const setAdvancedFilter = (value: FilterNode | null) => setFilterBarState({ advancedFilter: value });
+  // Local state for immediate UI responsiveness
+  // These update immediately on user input without blocking
+  const [localSearchText, setLocalSearchText] = useState(filterBarState.searchText);
+  const [localSelectedTypes, setLocalSelectedTypes] = useState(filterBarState.selectedTypes);
+  const [localSelectedSolutions, setLocalSelectedSolutions] = useState(filterBarState.selectedSolutions);
+  const [localManagedFilter, setLocalManagedFilter] = useState(filterBarState.managedFilter);
+
+  // Track if we've mounted to avoid syncing on initial render
+  const isInitialMount = useRef(true);
+
+  // Debounced values for expensive operations (backend query)
+  const debouncedSearchText = useDebouncedValue(localSearchText, FILTER_DEBOUNCE_MS);
+  const debouncedSelectedTypes = useDebouncedValue(localSelectedTypes, FILTER_DEBOUNCE_MS);
+  const debouncedSelectedSolutions = useDebouncedValue(localSelectedSolutions, FILTER_DEBOUNCE_MS);
+  const debouncedManagedFilter = useDebouncedValue(localManagedFilter, FILTER_DEBOUNCE_MS);
+
+  // Setters that only update local state (immediate, non-blocking)
+  const setSearchText = (value: string) => setLocalSearchText(value);
+  const setSelectedTypes = (value: string[]) => setLocalSelectedTypes(value);
+  const setSelectedSolutions = (value: string[]) => setLocalSelectedSolutions(value);
+  const setManagedFilter = (value: string) => setLocalManagedFilter(value);
+  const setAdvancedMode = useCallback((value: boolean) => setFilterBarState({ advancedMode: value }), [setFilterBarState]);
+  const setAdvancedFilter = useCallback((value: FilterNode | null) => {
+    console.log('[ComponentFilterBar] setAdvancedFilter called:', JSON.stringify(value, null, 2));
+    setFilterBarState({ advancedFilter: value });
+  }, [setFilterBarState]);
+
+  // Sync debounced values back to store (for persistence)
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    setFilterBarState({
+      searchText: debouncedSearchText,
+      selectedTypes: debouncedSelectedTypes,
+      selectedSolutions: debouncedSelectedSolutions,
+      managedFilter: debouncedManagedFilter,
+    });
+  }, [debouncedSearchText, debouncedSelectedTypes, debouncedSelectedSolutions, debouncedManagedFilter, setFilterBarState]);
+
+  // Use local values for display/badges
+  const searchText = localSearchText;
+  const selectedTypes = localSelectedTypes;
+  const selectedSolutions = localSelectedSolutions;
+  const managedFilter = localManagedFilter;
 
   // Extract unique values for filters
   const uniqueTypes = useMemo(() => {
@@ -131,17 +169,22 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
     onFilterChange(filteredComponents);
   }, [filteredComponents]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Convert simple filters to advanced filter AST
-  // Create a stable string representation for memoization
-  const simpleFiltersKey = useMemo(() => 
-    JSON.stringify({ searchText, selectedTypes, selectedSolutions, managedFilter }),
-    [searchText, selectedTypes, selectedSolutions, managedFilter]
+  // Convert simple filters to advanced filter AST using DEBOUNCED values
+  // This prevents expensive backend queries on every keystroke
+  const debouncedSimpleFiltersKey = useMemo(() => 
+    JSON.stringify({ 
+      searchText: debouncedSearchText, 
+      selectedTypes: debouncedSelectedTypes, 
+      selectedSolutions: debouncedSelectedSolutions, 
+      managedFilter: debouncedManagedFilter 
+    }),
+    [debouncedSearchText, debouncedSelectedTypes, debouncedSelectedSolutions, debouncedManagedFilter]
   );
   
   const convertSimpleFiltersToAdvanced = useMemo((): FilterNode | null => {
     // Parse the key back to get values (ensures memoization works correctly)
     const { searchText: search, selectedTypes: types, selectedSolutions: solutions, managedFilter: managed } = 
-      JSON.parse(simpleFiltersKey);
+      JSON.parse(debouncedSimpleFiltersKey);
     
     const conditions: FilterNode[] = [];
 
@@ -243,18 +286,18 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
         children: conditions
       };
     }
-  }, [simpleFiltersKey]); // Use the stable key instead of individual deps
+  }, [debouncedSimpleFiltersKey]); // Use debounced key for stable dep
 
   // Combined advanced filter: user's explicit advanced filter OR simple filters converted to advanced
   const combinedAdvancedFilter = useMemo((): FilterNode | null => {
-    if (advancedMode && advancedFilter) {
-      // In advanced mode, use only the explicit advanced filter
+    if (advancedMode) {
+      // In advanced mode, use only the explicit advanced filter (can be null initially)
       return advancedFilter;
     } else {
       // In simple mode, convert simple filters to advanced filter
       return convertSimpleFiltersToAdvanced;
     }
-  }, [advancedMode, advancedFilter, simpleFiltersKey]); // Use simpleFiltersKey for stable dep
+  }, [advancedMode, advancedFilter, convertSimpleFiltersToAdvanced]);
 
   // Notify parent when combined advanced filter changes (for backend query)
   // Use JSON stringification to avoid triggering on reference changes with same content
@@ -369,6 +412,7 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
         <div style={{ marginTop: tokens.spacingVerticalM }}>
           <AdvancedFilterBuilder
             solutions={availableSolutions || uniqueSolutions}
+            initialFilter={advancedFilter}
             onFilterChange={setAdvancedFilter}
           />
         </div>

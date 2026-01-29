@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   makeStyles,
   tokens,
@@ -31,6 +31,9 @@ import { LayerStackedBarChart } from '../visualizations/LayerStackedBarChart';
 import { LayerNetworkGraph } from '../visualizations/LayerNetworkGraph';
 import { LayerCirclePacking } from '../visualizations/LayerCirclePacking';
 import { LayerTreemap } from '../visualizations/LayerTreemap';
+import { useDebouncedValue } from '../hooks/useDebounce';
+
+const QUERY_DEBOUNCE_MS = 300;
 
 const useStyles = makeStyles({
   container: {
@@ -101,21 +104,33 @@ export const AnalysisTab: React.FC<AnalysisTabProps> = ({ onNavigateToDiff }) =>
   const [fullscreenViz, setFullscreenViz] = useState<boolean>(false);
 
   const loadComponents = useCallback(async (filter?: FilterNode | null) => {
+    console.log('[AnalysisTab] loadComponents called with filter:', JSON.stringify(filter, null, 2));
     const components = await queryComponents(filter);
     setAllComponents(components);
     setFilteredComponents(components);
   }, [queryComponents, setAllComponents, setFilteredComponents]);
 
   // Load components on mount and when advancedFilter changes
-  // Use JSON stringification to avoid re-triggering when object reference changes but content is same
+  // Debounce the filter to prevent rapid re-queries during typing/editing
   const advancedFilterJson = useMemo(() => 
     advancedFilter ? JSON.stringify(advancedFilter) : null,
     [advancedFilter]
   );
   
-  React.useEffect(() => {
-    loadComponents(advancedFilter);
-  }, [advancedFilterJson]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Debounce the JSON representation to batch rapid filter changes
+  const debouncedFilterJson = useDebouncedValue(advancedFilterJson, QUERY_DEBOUNCE_MS);
+  
+  // Keep a ref to the current filter so we query with the latest when debounce fires
+  const advancedFilterRef = useRef(advancedFilter);
+  useEffect(() => {
+    advancedFilterRef.current = advancedFilter;
+  }, [advancedFilter]);
+  
+  useEffect(() => {
+    // Parse the debounced JSON to get the filter, or use the ref for latest
+    // The ref ensures we always query with the most recent filter value
+    loadComponents(advancedFilterRef.current);
+  }, [debouncedFilterJson]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleFilterChange = useCallback((filtered: ComponentResult[]) => {
     setFilteredComponents(filtered);
