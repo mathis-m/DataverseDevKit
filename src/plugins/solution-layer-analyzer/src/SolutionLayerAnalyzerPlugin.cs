@@ -567,12 +567,27 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             
             if (changedRightAttributes.Count == 0)
             {
-                warnings.Add("No changed attributes found in right layer. Showing full diff.");
+                warnings.Add("No changed attributes detected in right layer. This may indicate the layer has no changes tracked. Showing full component JSON for comparison.");
                 // Fallback to full payload if no changes tracked
-                var (leftPayload, _) = payloadService.RetrievePayloadFromComponentJson(leftLayer.ComponentJson);
-                leftText = leftPayload;
-                var (rightPayload, _) = payloadService.RetrievePayloadFromComponentJson(rightLayer.ComponentJson);
-                rightText = rightPayload;
+                if (!string.IsNullOrEmpty(leftLayer.ComponentJson))
+                {
+                    var (leftPayload, _) = payloadService.RetrievePayloadFromComponentJson(leftLayer.ComponentJson);
+                    leftText = leftPayload;
+                }
+                else
+                {
+                    leftText = "{}";
+                }
+                
+                if (!string.IsNullOrEmpty(rightLayer.ComponentJson))
+                {
+                    var (rightPayload, _) = payloadService.RetrievePayloadFromComponentJson(rightLayer.ComponentJson);
+                    rightText = rightPayload;
+                }
+                else
+                {
+                    rightText = "{}";
+                }
             }
             else
             {
@@ -616,13 +631,13 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
                 {
                     try
                     {
-                        // Try parsing as JSON first
-                        using var doc = JsonDocument.Parse(value);
+                        // Try parsing and deserializing as JSON
                         attributesDict[matchingAttr.AttributeName] = JsonSerializer.Deserialize<object>(value);
                     }
-                    catch
+                    catch (JsonException ex)
                     {
-                        // If not JSON, just use the string value
+                        // If JSON parsing fails, log and use the string value
+                        _context!.Logger.LogDebug(ex, "Failed to parse complex value as JSON for attribute {AttributeName}", matchingAttr.AttributeName);
                         attributesDict[matchingAttr.AttributeName] = value;
                     }
                 }

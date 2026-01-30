@@ -130,7 +130,7 @@ public sealed class AnalyzerDbContext : DbContext
             entity.HasIndex(e => e.AttributeName);
             entity.HasIndex(e => new { e.LayerId, e.AttributeName });
             entity.HasIndex(e => e.AttributeType);
-            entity.HasIndex(e => e.IsChanged);
+            entity.HasIndex(e => new { e.LayerId, e.IsChanged });
         });
 
         // Configure Artifact entity
