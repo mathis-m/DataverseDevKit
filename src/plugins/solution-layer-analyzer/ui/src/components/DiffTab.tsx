@@ -104,6 +104,7 @@ interface AttributeDiff {
   onlyInLeft: boolean;
   onlyInRight: boolean;
   isComplex: boolean; // true if value needs Monaco editor
+  attributeType: number; // 4=Json, 5=Xml, etc.
 }
 
 interface DiffTabProps {
@@ -145,15 +146,32 @@ export const DiffTab: React.FC<DiffTabProps> = ({
     });
   }, [componentId, leftSolution, rightSolution, leftPayload, rightPayload, warnings, searchTerm, setDiffState]);
 
-  // Parse JSON payloads and extract attributes
-  const parseAttributes = (jsonText: string): Record<string, any> => {
+  // Attribute type enum values from backend
+  const AttributeTypeEnum = {
+    String: 0,
+    Number: 1,
+    Boolean: 2,
+    DateTime: 3,
+    Json: 4,
+    Xml: 5,
+    EntityReference: 6,
+    OptionSet: 7,
+    Money: 8,
+    Lookup: 9,
+  };
+
+  // Parse JSON payloads and extract attributes with type info
+  const parseAttributes = (jsonText: string): Record<string, { value: any; type: number }> => {
     try {
       const parsed = JSON.parse(jsonText);
       if (parsed.Attributes && Array.isArray(parsed.Attributes)) {
-        const attrs: Record<string, any> = {};
+        const attrs: Record<string, { value: any; type: number }> = {};
         parsed.Attributes.forEach((attr: any) => {
           if (attr.Key) {
-            attrs[attr.Key] = attr.Value;
+            attrs[attr.Key] = {
+              value: attr.Value,
+              type: attr.Type ?? AttributeTypeEnum.String,
+            };
           }
         });
         return attrs;
@@ -165,11 +183,12 @@ export const DiffTab: React.FC<DiffTabProps> = ({
   };
 
   // Determine if value is complex (needs Monaco editor)
-  const isComplexValue = (value: any): boolean => {
+  const isComplexValue = (value: any, attrType: number): boolean => {
+    // Json (4) and Xml (5) types are always complex
+    if (attrType === AttributeTypeEnum.Json || attrType === AttributeTypeEnum.Xml) return true;
     if (value === null || value === undefined) return false;
     if (typeof value === 'object') return true;
     if (typeof value === 'string' && value.length > 200) return true;
-    if (typeof value === 'string' && (value.includes('<') || value.includes('{'))) return true;
     return false;
   };
 
@@ -184,11 +203,16 @@ export const DiffTab: React.FC<DiffTabProps> = ({
     const diffs: AttributeDiff[] = [];
     
     allKeys.forEach(key => {
-      const leftValue = leftAttrs[key];
-      const rightValue = rightAttrs[key];
+      const leftAttr = leftAttrs[key];
+      const rightAttr = rightAttrs[key];
+      const leftValue = leftAttr?.value;
+      const rightValue = rightAttr?.value;
       const onlyInLeft = !(key in rightAttrs);
       const onlyInRight = !(key in leftAttrs);
       const isDifferent = !onlyInLeft && !onlyInRight && JSON.stringify(leftValue) !== JSON.stringify(rightValue);
+      
+      // Get attribute type from either side (prefer right as it has the change)
+      const attributeType = rightAttr?.type ?? leftAttr?.type ?? AttributeTypeEnum.String;
       
       // Only include if there's a difference or only in one side
       if (isDifferent || onlyInLeft || onlyInRight) {
@@ -199,7 +223,8 @@ export const DiffTab: React.FC<DiffTabProps> = ({
           isDifferent,
           onlyInLeft,
           onlyInRight,
-          isComplex: isComplexValue(leftValue) || isComplexValue(rightValue),
+          isComplex: isComplexValue(leftValue, attributeType) || isComplexValue(rightValue, attributeType),
+          attributeType,
         });
       }
     });
@@ -214,8 +239,10 @@ export const DiffTab: React.FC<DiffTabProps> = ({
     const term = searchTerm.toLowerCase();
     return attributeDiffs.filter(diff => {
       const keyMatch = diff.key.toLowerCase().includes(term);
-      const leftValueMatch = String(diff.leftValue || '').toLowerCase().includes(term);
-      const rightValueMatch = String(diff.rightValue || '').toLowerCase().includes(term);
+      const leftValueStr = typeof diff.leftValue === 'object' ? JSON.stringify(diff.leftValue) : String(diff.leftValue || '');
+      const rightValueStr = typeof diff.rightValue === 'object' ? JSON.stringify(diff.rightValue) : String(diff.rightValue || '');
+      const leftValueMatch = leftValueStr.toLowerCase().includes(term);
+      const rightValueMatch = rightValueStr.toLowerCase().includes(term);
       return keyMatch || leftValueMatch || rightValueMatch;
     });
   }, [attributeDiffs, searchTerm]);
@@ -295,7 +322,22 @@ export const DiffTab: React.FC<DiffTabProps> = ({
       ? (typeof diff.rightValue === 'object' ? JSON.stringify(diff.rightValue, null, 2) : String(diff.rightValue))
       : '';
     
-    const language = leftText.startsWith('<') || rightText.startsWith('<') ? 'xml' : 'json';
+    // Determine language from attribute type (5=Xml, 4=Json)
+    let language = 'plaintext';
+    if (diff.attributeType === AttributeTypeEnum.Xml) {
+      language = 'xml';
+    } else if (diff.attributeType === AttributeTypeEnum.Json) {
+      language = 'json';
+    } else if (typeof diff.leftValue === 'object' || typeof diff.rightValue === 'object') {
+      language = 'json';
+    } else {
+      // Fallback heuristic for content that wasn't typed
+      const hasXml = leftText.trim().startsWith('<') || rightText.trim().startsWith('<');
+      const hasJson = leftText.trim().startsWith('{') || leftText.trim().startsWith('[') ||
+                      rightText.trim().startsWith('{') || rightText.trim().startsWith('[');
+      if (hasXml) language = 'xml';
+      else if (hasJson) language = 'json';
+    }
     
     return (
       <div className={styles.editorContainer}>

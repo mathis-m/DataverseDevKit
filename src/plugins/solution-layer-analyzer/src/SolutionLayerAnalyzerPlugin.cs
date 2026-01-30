@@ -17,18 +17,18 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 {
     private IPluginContext? _context;
     private bool _disposed;
-    
+
     /// <summary>
     /// Cache of DbContextOptions per connection ID.
     /// Each connection gets its own SQLite database file on disk.
     /// </summary>
     private readonly Dictionary<string, DbContextOptions<AnalyzerDbContext>> _dbOptionsCache = new();
-    
+
     /// <summary>
     /// Lock for thread-safe access to the options cache.
     /// </summary>
     private readonly object _cacheLock = new();
-    
+
     /// <summary>
     /// Semaphore to serialize database operations per connection.
     /// </summary>
@@ -80,7 +80,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             // Create database file path unique to this connection
             var dbDirectory = GetDatabaseDirectory();
             Directory.CreateDirectory(dbDirectory);
-            
+
             // Sanitize connection ID for use in filename
             var safeConnectionId = string.Join("_", connectionId.Split(Path.GetInvalidFileNameChars()));
             var dbPath = Path.Combine(dbDirectory, $"analyzer_{safeConnectionId}.db");
@@ -236,7 +236,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         _context = context;
         _context.Logger.LogInformation("Solution Layer Analyzer plugin initialized");
         _context.Logger.LogInformation("Database directory: {DbDirectory}", GetDatabaseDirectory());
-        
+
         return Task.CompletedTask;
     }
 
@@ -402,23 +402,12 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 
         _context!.Logger.LogInformation("Executing query with filters: {HasFilters}", request.Filters != null);
 
-        var dbLock = GetDbLock(request.ConnectionId);
+        // Use QueryService with a new DbContext instance
+        await using var dbContext = CreateDbContext(request.ConnectionId);
+        var queryService = new QueryService(dbContext);
+        var response = await queryService.QueryAsync(request, cancellationToken);
 
-        // Serialize database access to avoid SQLite concurrency issues
-        await dbLock.WaitAsync(cancellationToken);
-        try
-        {
-            // Use QueryService with a new DbContext instance
-            await using var dbContext = CreateDbContext(request.ConnectionId);
-            var queryService = new QueryService(dbContext);
-            var response = await queryService.QueryAsync(request, cancellationToken);
-
-            return JsonSerializer.SerializeToElement(response, JsonOptions);
-        }
-        finally
-        {
-            dbLock.Release();
-        }
+        return JsonSerializer.SerializeToElement(response, JsonOptions);
     }
 
     private async Task<JsonElement> ExecuteDetailsAsync(string payload, CancellationToken cancellationToken)
@@ -428,46 +417,36 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 
         _context!.Logger.LogInformation("Getting details for component: {ComponentId}", request.ComponentId);
 
-        var dbLock = GetDbLock(request.ConnectionId);
 
-        // Serialize database access to avoid SQLite concurrency issues
-        await dbLock.WaitAsync(cancellationToken);
-        try
+        await using var dbContext = CreateDbContext(request.ConnectionId);
+        var component = await dbContext.Components
+            .Include(c => c.Layers)
+            .FirstOrDefaultAsync(c => c.ComponentId == request.ComponentId, cancellationToken);
+
+        if (component == null)
         {
-            await using var dbContext = CreateDbContext(request.ConnectionId);
-            var component = await dbContext.Components
-                .Include(c => c.Layers)
-                .FirstOrDefaultAsync(c => c.ComponentId == request.ComponentId, cancellationToken);
-
-            if (component == null)
-            {
-                throw new InvalidOperationException($"Component not found: {request.ComponentId}");
-            }
-
-            var response = new DetailsResponse
-            {
-                Layers = component.Layers
-                    .OrderBy(l => l.Ordinal)
-                    .Select(l => new LayerDetail
-                    {
-                        SolutionName = l.SolutionName,
-                        Publisher = l.Publisher,
-                        IsManaged = l.IsManaged,
-                        Version = l.Version,
-                        CreatedOn = l.CreatedOn,
-                        Ordinal = l.Ordinal,
-                        ComponentJson = ParseComponentJson(l.ComponentJson),
-                        Changes = null // msdyn_changes would need to be retrieved separately if needed
-                    })
-                    .ToList()
-            };
-
-            return JsonSerializer.SerializeToElement(response, JsonOptions);
+            throw new InvalidOperationException($"Component not found: {request.ComponentId}");
         }
-        finally
+
+        var response = new DetailsResponse
         {
-            dbLock.Release();
-        }
+            Layers = component.Layers
+                .OrderBy(l => l.Ordinal)
+                .Select(l => new LayerDetail
+                {
+                    SolutionName = l.SolutionName,
+                    Publisher = l.Publisher,
+                    IsManaged = l.IsManaged,
+                    Version = l.Version,
+                    CreatedOn = l.CreatedOn,
+                    Ordinal = l.Ordinal,
+                    ComponentJson = ParseComponentJson(l.ComponentJson),
+                    Changes = null // msdyn_changes would need to be retrieved separately if needed
+                })
+                .ToList()
+        };
+
+        return JsonSerializer.SerializeToElement(response, JsonOptions);
     }
 
     private async Task<JsonElement> ExecuteDiffAsync(string payload, CancellationToken cancellationToken)
@@ -482,7 +461,6 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             request.Right.SolutionName);
 
         var connectionId = request.ConnectionId ?? string.Empty;
-        var dbLock = GetDbLock(connectionId);
 
         // Get component data with attributes within lock
         Models.Component component;
@@ -490,39 +468,31 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         Layer? rightLayer = null;
         List<LayerAttribute> leftAttributes = new();
         List<LayerAttribute> rightAttributes = new();
-        
-        await dbLock.WaitAsync(cancellationToken);
-        try
-        {
-            await using var dbContext = CreateDbContext(connectionId);
-            var found = await dbContext.Components
-                .Include(c => c.Layers)
-                .ThenInclude(l => l.Attributes)
-                .FirstOrDefaultAsync(c => c.ComponentId == request.ComponentId, cancellationToken);
 
-            if (found == null)
-            {
-                throw new InvalidOperationException($"Component not found: {request.ComponentId}");
-            }
-            component = found;
-            
-            // Find left and right layers
-            leftLayer = component.Layers.FirstOrDefault(l => l.SolutionName == request.Left.SolutionName);
-            rightLayer = component.Layers.FirstOrDefault(l => l.SolutionName == request.Right.SolutionName);
-            
-            // Get attributes
-            if (leftLayer != null)
-            {
-                leftAttributes = leftLayer.Attributes.ToList();
-            }
-            if (rightLayer != null)
-            {
-                rightAttributes = rightLayer.Attributes.ToList();
-            }
-        }
-        finally
+        await using var dbContext = CreateDbContext(connectionId);
+        var found = await dbContext.Components
+            .Include(c => c.Layers)
+            .ThenInclude(l => l.Attributes)
+            .FirstOrDefaultAsync(c => c.ComponentId == request.ComponentId, cancellationToken);
+
+        if (found == null)
         {
-            dbLock.Release();
+            throw new InvalidOperationException($"Component not found: {request.ComponentId}");
+        }
+        component = found;
+
+        // Find left and right layers
+        leftLayer = component.Layers.FirstOrDefault(l => l.SolutionName == request.Left.SolutionName);
+        rightLayer = component.Layers.FirstOrDefault(l => l.SolutionName == request.Right.SolutionName);
+
+        // Get attributes
+        if (leftLayer != null)
+        {
+            leftAttributes = leftLayer.Attributes.ToList();
+        }
+        if (rightLayer != null)
+        {
+            rightAttributes = rightLayer.Attributes.ToList();
         }
 
         // Get ServiceClient for payload retrieval
@@ -564,7 +534,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             // New behavior: use LayerAttributes table to filter only changed attributes
             // Get all right side attributes where IsChanged = true
             var changedRightAttributes = rightAttributes.Where(a => a.IsChanged).ToList();
-            
+
             if (changedRightAttributes.Count == 0)
             {
                 warnings.Add("No changed attributes detected in right layer. This may indicate the layer has no changes tracked. Showing full component JSON for comparison.");
@@ -578,7 +548,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
                 {
                     leftText = "{}";
                 }
-                
+
                 if (!string.IsNullOrEmpty(rightLayer.ComponentJson))
                 {
                     var (rightPayload, _) = payloadService.RetrievePayloadFromComponentJson(rightLayer.ComponentJson);
@@ -609,23 +579,45 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
     }
 
     /// <summary>
+    /// Attributes to always exclude from diff comparison (system/metadata fields).
+    /// </summary>
+    private static readonly HashSet<string> ExcludedDiffAttributes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "sitemapnameunique",
+        "solutionid",
+        "sitemapxml",
+        "ismanaged",
+        "sitemapidunique",
+        "isappaware",
+        "createdon",
+        "componentstate",
+        "modifiedon",
+        "sitemapid",
+        "versionnumber",
+        "sitemapname",
+        "enablecollapsiblegroups",
+        "showhome",
+        "showrecents",
+        "showpinned",
+    };
+
+    /// <summary>
     /// Builds a filtered JSON payload containing only the specified attributes.
     /// </summary>
     private string BuildFilteredPayload(List<LayerAttribute> allAttributes, List<LayerAttribute> changedAttributes)
     {
         var attributesDict = new Dictionary<string, object?>();
-        
-        // For each changed attribute, find it in allAttributes by name
-        foreach (var changedAttr in changedAttributes)
+
+        // For each changed attribute, find it in allAttributes by name (excluding system attributes)
+        foreach (var changedAttr in changedAttributes.Where(a => !ExcludedDiffAttributes.Contains(a.AttributeName)))
         {
-            var matchingAttr = allAttributes.FirstOrDefault(a => 
+            var matchingAttr = allAttributes.FirstOrDefault(a =>
                 string.Equals(a.AttributeName, changedAttr.AttributeName, StringComparison.OrdinalIgnoreCase));
-            
+
             if (matchingAttr != null)
             {
-                // Use the raw value if available, otherwise use formatted value
-                var value = matchingAttr.RawValue ?? matchingAttr.AttributeValue;
-                
+                var value = matchingAttr.AttributeValue ?? matchingAttr.RawValue;
+
                 // Try to parse complex types back to objects for proper JSON serialization
                 if (matchingAttr.IsComplexValue && !string.IsNullOrEmpty(value))
                 {
@@ -652,17 +644,19 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
                 attributesDict[changedAttr.AttributeName] = null;
             }
         }
-        
-        // Create the standard Dataverse format with Attributes array
+
+        // Create the standard Dataverse format with Attributes array, including type info
+        var attributeTypeMap = allAttributes.ToDictionary(a => a.AttributeName, a => (int)a.AttributeType, StringComparer.OrdinalIgnoreCase);
         var result = new
         {
             Attributes = attributesDict.Select(kvp => new
             {
                 Key = kvp.Key,
-                Value = kvp.Value
+                Value = kvp.Value,
+                Type = attributeTypeMap.TryGetValue(kvp.Key, out var attrType) ? attrType : 0
             }).ToList()
         };
-        
+
         return JsonSerializer.Serialize(result, new JsonSerializerOptions
         {
             WriteIndented = true
@@ -673,8 +667,8 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
     {
         // Parse connection ID from payload
         var request = JsonSerializer.Deserialize<JsonElement>(payload);
-        var connectionId = request.TryGetProperty("connectionId", out var connIdProp) 
-            ? connIdProp.GetString() ?? string.Empty 
+        var connectionId = request.TryGetProperty("connectionId", out var connIdProp)
+            ? connIdProp.GetString() ?? string.Empty
             : string.Empty;
 
         _context!.Logger.LogInformation("Clearing index for connection: {ConnectionId}", connectionId);
@@ -710,21 +704,11 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 
         _context!.Logger.LogInformation("Saving index config: {Name}", request.Name);
 
-        var dbLock = GetDbLock(request.ConnectionId);
+        await using var dbContext = CreateDbContext(request.ConnectionId);
+        var configService = new ConfigService(dbContext, _context.Logger);
+        var response = await configService.SaveIndexConfigAsync(request, cancellationToken);
 
-        await dbLock.WaitAsync(cancellationToken);
-        try
-        {
-            await using var dbContext = CreateDbContext(request.ConnectionId);
-            var configService = new ConfigService(dbContext, _context.Logger);
-            var response = await configService.SaveIndexConfigAsync(request, cancellationToken);
-
-            return JsonSerializer.SerializeToElement(response, JsonOptions);
-        }
-        finally
-        {
-            dbLock.Release();
-        }
+        return JsonSerializer.SerializeToElement(response, JsonOptions);
     }
 
     private async Task<JsonElement> ExecuteLoadIndexConfigsAsync(string payload, CancellationToken cancellationToken)
@@ -735,21 +719,11 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         _context!.Logger.LogInformation("Loading index configs");
 
         var connectionId = request.ConnectionId ?? string.Empty;
-        var dbLock = GetDbLock(connectionId);
+        await using var dbContext = CreateDbContext(connectionId);
+        var configService = new ConfigService(dbContext, _context.Logger);
+        var response = await configService.LoadIndexConfigsAsync(request, cancellationToken);
 
-        await dbLock.WaitAsync(cancellationToken);
-        try
-        {
-            await using var dbContext = CreateDbContext(connectionId);
-            var configService = new ConfigService(dbContext, _context.Logger);
-            var response = await configService.LoadIndexConfigsAsync(request, cancellationToken);
-
-            return JsonSerializer.SerializeToElement(response, JsonOptions);
-        }
-        finally
-        {
-            dbLock.Release();
-        }
+        return JsonSerializer.SerializeToElement(response, JsonOptions);
     }
 
     private async Task<JsonElement> ExecuteSaveFilterConfigAsync(string payload, CancellationToken cancellationToken)
@@ -760,21 +734,11 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         _context!.Logger.LogInformation("Saving filter config: {Name}", request.Name);
 
         var connectionId = request.ConnectionId ?? string.Empty;
-        var dbLock = GetDbLock(connectionId);
+        await using var dbContext = CreateDbContext(connectionId);
+        var configService = new ConfigService(dbContext, _context.Logger);
+        var response = await configService.SaveFilterConfigAsync(request, cancellationToken);
 
-        await dbLock.WaitAsync(cancellationToken);
-        try
-        {
-            await using var dbContext = CreateDbContext(connectionId);
-            var configService = new ConfigService(dbContext, _context.Logger);
-            var response = await configService.SaveFilterConfigAsync(request, cancellationToken);
-
-            return JsonSerializer.SerializeToElement(response, JsonOptions);
-        }
-        finally
-        {
-            dbLock.Release();
-        }
+        return JsonSerializer.SerializeToElement(response, JsonOptions);
     }
 
     private async Task<JsonElement> ExecuteLoadFilterConfigsAsync(string payload, CancellationToken cancellationToken)
@@ -785,21 +749,11 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         _context!.Logger.LogInformation("Loading filter configs");
 
         var connectionId = request.ConnectionId ?? string.Empty;
-        var dbLock = GetDbLock(connectionId);
+        await using var dbContext = CreateDbContext(connectionId);
+        var configService = new ConfigService(dbContext, _context.Logger);
+        var response = await configService.LoadFilterConfigsAsync(request, cancellationToken);
 
-        await dbLock.WaitAsync(cancellationToken);
-        try
-        {
-            await using var dbContext = CreateDbContext(connectionId);
-            var configService = new ConfigService(dbContext, _context.Logger);
-            var response = await configService.LoadFilterConfigsAsync(request, cancellationToken);
-
-            return JsonSerializer.SerializeToElement(response, JsonOptions);
-        }
-        finally
-        {
-            dbLock.Release();
-        }
+        return JsonSerializer.SerializeToElement(response, JsonOptions);
     }
 
     private async Task<JsonElement> ExecuteFetchSolutionsAsync(string payload, CancellationToken cancellationToken)
@@ -832,8 +786,8 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
                 DisplayName = entity.GetAttributeValue<string>("friendlyname") ?? string.Empty,
                 Version = entity.GetAttributeValue<string>("version") ?? "1.0.0.0",
                 IsManaged = entity.GetAttributeValue<bool>("ismanaged"),
-                Publisher = entity.Contains("publisherid") 
-                    ? ((Microsoft.Xrm.Sdk.EntityReference)entity["publisherid"]).Name 
+                Publisher = entity.Contains("publisherid")
+                    ? ((Microsoft.Xrm.Sdk.EntityReference)entity["publisherid"]).Name
                     : null
             });
         }
@@ -892,29 +846,18 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         _context!.Logger.LogInformation("Computing analytics");
 
         var connectionId = request.ConnectionId ?? string.Empty;
-        var dbLock = GetDbLock(connectionId);
+        using var dbContext = CreateDbContext(connectionId);
 
-        // Serialize database access
-        await dbLock.WaitAsync(cancellationToken);
-        try
-        {
-            using var dbContext = CreateDbContext(connectionId);
-            
-            var analyticsService = new AnalyticsService(_context.Logger);
-            var analytics = await analyticsService.ComputeAnalyticsAsync(dbContext, cancellationToken);
-            
-            _context.Logger.LogInformation(
-                "Analytics computed: {Solutions} solutions, {Components} components with risks, {Violations} violations detected",
-                analytics.SolutionMetrics.Count,
-                analytics.ComponentRisks.Count,
-                analytics.Violations.Count);
-            
-            return JsonSerializer.SerializeToElement(analytics, JsonOptions);
-        }
-        finally
-        {
-            dbLock.Release();
-        }
+        var analyticsService = new AnalyticsService(_context.Logger);
+        var analytics = await analyticsService.ComputeAnalyticsAsync(dbContext, cancellationToken);
+
+        _context.Logger.LogInformation(
+            "Analytics computed: {Solutions} solutions, {Components} components with risks, {Violations} violations detected",
+            analytics.SolutionMetrics.Count,
+            analytics.ComponentRisks.Count,
+            analytics.Violations.Count);
+
+        return JsonSerializer.SerializeToElement(analytics, JsonOptions);
     }
 
     /// <inheritdoc/>
