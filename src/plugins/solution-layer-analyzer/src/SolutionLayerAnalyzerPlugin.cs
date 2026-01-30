@@ -693,6 +693,11 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         var request = JsonSerializer.Deserialize<FetchSolutionsRequest>(payload, JsonOptions)
             ?? throw new ArgumentException("Invalid fetchSolutions request payload", nameof(payload));
 
+        if (string.IsNullOrEmpty(request.ConnectionId))
+        {
+            throw new ArgumentException("ConnectionId is required", nameof(payload));
+        }
+
         _context!.Logger.LogInformation("Fetching solutions from Dataverse");
 
         var serviceClient = _context.ServiceClientFactory.GetServiceClient(request.ConnectionId);

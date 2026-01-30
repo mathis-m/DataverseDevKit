@@ -78,6 +78,30 @@ export interface FilterNode {
   value?: string;
   // Nested query properties
   layerFilter?: FilterNode; // For LAYER_QUERY
+  // Source identifier for correlating simple filter UI controls with their AST representation
+  // Used to find/update specific nodes when simple filter values change
+  sourceId?: 'simple-search' | 'simple-types' | 'simple-solutions' | 'simple-managed' | string;
+}
+
+/**
+ * Represents the simple filter values extracted from a FilterNode AST.
+ * These values drive the simple filter UI controls.
+ */
+export interface SimpleFilterValues {
+  searchText: string;
+  selectedTypes: string[];
+  selectedSolutions: string[];
+  managedFilter: 'all' | 'managed' | 'unmanaged';
+}
+
+/**
+ * Information about filter complexity for UI display
+ */
+export interface FilterComplexityInfo {
+  /** True if the current filter can be fully represented in simple mode */
+  isSimpleRepresentable: boolean;
+  /** Descriptions of conditions that cannot be shown in simple mode */
+  hiddenConditions: string[];
 }
 
 export interface IndexResponse {

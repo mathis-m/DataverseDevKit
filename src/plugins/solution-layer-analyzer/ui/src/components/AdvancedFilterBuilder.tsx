@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   makeStyles,
   tokens,
@@ -111,13 +111,21 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
 }) => {
   const styles = useStyles();
   
-  // Initialize with the provided filter or create a new empty AND root
-  const [rootFilter, setRootFilter] = useState<FilterNode>(() => {
-    if (initialFilter && initialFilter.type === 'AND' && initialFilter.children) {
-      // Use the existing filter structure, ensuring it has an id
+  // The filter is now controlled by the parent (useFilter hook)
+  // We use the initialFilter directly and call onFilterChange to update it
+  const rootFilter: FilterNode = useMemo(() => {
+    if (initialFilter && initialFilter.type === 'AND') {
       return {
         ...initialFilter,
         id: initialFilter.id || 'root',
+      };
+    }
+    if (initialFilter) {
+      // Wrap non-AND filter in an AND root
+      return {
+        type: 'AND',
+        id: 'root',
+        children: [initialFilter],
       };
     }
     return {
@@ -125,66 +133,16 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
       id: 'root',
       children: [],
     };
-  });
-
-  // Track if we're in the initial mount phase
-  const isInitialMount = useRef(true);
-  
-  // Update rootFilter when initialFilter prop changes (e.g., switching from simple to advanced mode)
-  // This ensures that simple filters are visible when switching to advanced mode
-  useEffect(() => {
-    if (initialFilter) {
-      // Only update if the filter content actually changed
-      // Use JSON comparison to avoid unnecessary updates and infinite loops
-      const filterJson = JSON.stringify(initialFilter);
-      const currentJson = JSON.stringify(rootFilter);
-      
-      if (filterJson !== currentJson) {
-        console.log('[AdvancedFilterBuilder] initialFilter changed, updating rootFilter:', JSON.stringify(initialFilter, null, 2));
-        setRootFilter({
-          ...initialFilter,
-          id: initialFilter.id || 'root',
-        });
-      }
-    } else if (initialFilter === null && rootFilter.children && rootFilter.children.length > 0) {
-      // If initialFilter becomes null, reset to empty root
-      console.log('[AdvancedFilterBuilder] initialFilter became null, resetting rootFilter');
-      setRootFilter({
-        type: 'AND',
-        id: 'root',
-        children: [],
-      });
-    }
-  }, [initialFilter]); // Intentionally not including rootFilter to avoid circular updates
-  
-  // Stable callback ref to avoid closure issues
-  const onFilterChangeRef = useRef(onFilterChange);
-  useEffect(() => {
-    onFilterChangeRef.current = onFilterChange;
-  }, [onFilterChange]);
-
-  // Sync filter changes to parent via useEffect
-  // This ensures changes are always propagated regardless of how rootFilter is updated
-  useEffect(() => {
-    // Skip the initial mount - only sync subsequent changes
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
-    
-    const filterToSend = rootFilter.children && rootFilter.children.length > 0 ? rootFilter : null;
-    console.log('[AdvancedFilterBuilder] Syncing filter to parent:', JSON.stringify(filterToSend, null, 2));
-    onFilterChangeRef.current(filterToSend);
-  }, [rootFilter]);
+  }, [initialFilter]);
 
   // Track selected filter type for each node that can have children
   const [selectedFilterTypes, setSelectedFilterTypes] = useState<Record<string, string>>({});
 
-  // Internal update function that just updates local state
-  // The useEffect above handles propagation to parent
+  // Update function that calls parent's onFilterChange
   const updateFilter = useCallback((updatedFilter: FilterNode) => {
-    setRootFilter(updatedFilter);
-  }, []);
+    const filterToSend = updatedFilter.children && updatedFilter.children.length > 0 ? updatedFilter : null;
+    onFilterChange(filterToSend);
+  }, [onFilterChange]);
 
   const addChild = (parentId: string, childType: string) => {
     const newChild: FilterNode = {
@@ -223,13 +181,14 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
           children: [...(node.children || []), newChild],
         };
       }
+      let updated = node;
       if (node.children) {
-        return {
-          ...node,
-          children: node.children.map(child => addToNode(child)),
-        };
+        updated = { ...updated, children: node.children.map(child => addToNode(child)) };
       }
-      return node;
+      if (node.layerFilter) {
+        updated = { ...updated, layerFilter: addToNode(node.layerFilter) };
+      }
+      return updated;
     };
 
     updateFilter(addToNode(rootFilter));
@@ -239,15 +198,21 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
 
   const removeChild = (nodeId: string) => {
     const removeFromNode = (node: FilterNode): FilterNode => {
+      let updated = node;
       if (node.children) {
-        return {
-          ...node,
+        updated = {
+          ...updated,
           children: node.children
             .filter(child => child.id !== nodeId)
             .map(child => removeFromNode(child)),
         };
       }
-      return node;
+      if (node.layerFilter) {
+        // If layerFilter itself is the target, we shouldn't remove it entirely - leave it
+        // But we should recurse into it to remove children
+        updated = { ...updated, layerFilter: removeFromNode(node.layerFilter) };
+      }
+      return updated;
     };
 
     updateFilter(removeFromNode(rootFilter));
@@ -261,13 +226,14 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
           [property]: value,
         };
       }
+      let updated = node;
       if (node.children) {
-        return {
-          ...node,
-          children: node.children.map(child => updateNode(child)),
-        };
+        updated = { ...updated, children: node.children.map(child => updateNode(child)) };
       }
-      return node;
+      if (node.layerFilter) {
+        updated = { ...updated, layerFilter: updateNode(node.layerFilter) };
+      }
+      return updated;
     };
 
     updateFilter(updateNode(rootFilter));
@@ -292,10 +258,14 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
         }
         return { ...node, sequence: newSequence };
       }
+      let updated = node;
       if (node.children) {
-        return { ...node, children: node.children.map(child => updateNode(child)) };
+        updated = { ...updated, children: node.children.map(child => updateNode(child)) };
       }
-      return node;
+      if (node.layerFilter) {
+        updated = { ...updated, layerFilter: updateNode(node.layerFilter) };
+      }
+      return updated;
     };
     updateFilter(updateNode(rootFilter));
   };
@@ -309,10 +279,14 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
         }
         return { ...node, sequence: newSequence };
       }
+      let updated = node;
       if (node.children) {
-        return { ...node, children: node.children.map(child => updateNode(child)) };
+        updated = { ...updated, children: node.children.map(child => updateNode(child)) };
       }
-      return node;
+      if (node.layerFilter) {
+        updated = { ...updated, layerFilter: updateNode(node.layerFilter) };
+      }
+      return updated;
     };
     updateFilter(updateNode(rootFilter));
   };
@@ -322,10 +296,14 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
       if (node.id === nodeId && node.sequence) {
         return { ...node, sequence: [...node.sequence, []] };
       }
+      let updated = node;
       if (node.children) {
-        return { ...node, children: node.children.map(child => updateNode(child)) };
+        updated = { ...updated, children: node.children.map(child => updateNode(child)) };
       }
-      return node;
+      if (node.layerFilter) {
+        updated = { ...updated, layerFilter: updateNode(node.layerFilter) };
+      }
+      return updated;
     };
     updateFilter(updateNode(rootFilter));
   };
@@ -336,10 +314,14 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
         const newSequence = node.sequence.filter((_: any, i: number) => i !== stepIndex);
         return { ...node, sequence: newSequence.length > 0 ? newSequence : [[]] };
       }
+      let updated = node;
       if (node.children) {
-        return { ...node, children: node.children.map(child => updateNode(child)) };
+        updated = { ...updated, children: node.children.map(child => updateNode(child)) };
       }
-      return node;
+      if (node.layerFilter) {
+        updated = { ...updated, layerFilter: updateNode(node.layerFilter) };
+      }
+      return updated;
     };
     updateFilter(updateNode(rootFilter));
   };
@@ -351,10 +333,14 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
         newSequence[stepIndex] = query;
         return { ...node, sequence: newSequence };
       }
+      let updated = node;
       if (node.children) {
-        return { ...node, children: node.children.map(child => updateNode(child)) };
+        updated = { ...updated, children: node.children.map(child => updateNode(child)) };
       }
-      return node;
+      if (node.layerFilter) {
+        updated = { ...updated, layerFilter: updateNode(node.layerFilter) };
+      }
+      return updated;
     };
     updateFilter(updateNode(rootFilter));
   };
@@ -366,10 +352,14 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
         newSequence[stepIndex] = [];
         return { ...node, sequence: newSequence };
       }
+      let updated = node;
       if (node.children) {
-        return { ...node, children: node.children.map(child => updateNode(child)) };
+        updated = { ...updated, children: node.children.map(child => updateNode(child)) };
       }
-      return node;
+      if (node.layerFilter) {
+        updated = { ...updated, layerFilter: updateNode(node.layerFilter) };
+      }
+      return updated;
     };
     updateFilter(updateNode(rootFilter));
   };
@@ -427,10 +417,10 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
 
   // Helper to determine what filter types are available based on context
   // This implements the hierarchical filter architecture from the requirements
-  const getAvailableFilterTypes = (parentNode: FilterNode, depth: number) => {
+  const getAvailableFilterTypes = (parentNode: FilterNode, depth: number, isInLayerFilter: boolean = false) => {
     // Determine context based on parent type and depth
     const isTopLevel = parentNode.id === 'root' || (parentNode.type && ['AND', 'OR', 'NOT'].includes(parentNode.type) && depth === 0);
-    const isLayerQueryContext = parentNode.type === 'LAYER_QUERY' || 
+    const isLayerQueryContext = isInLayerFilter || parentNode.type === 'LAYER_QUERY' || 
                                  (parentNode.layerFilter !== undefined); // Inside LAYER_QUERY
     const isOrderSequenceContext = parentNode.type === 'ORDER_STRICT' || parentNode.type === 'ORDER_FLEX';
     
@@ -599,10 +589,10 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
     );
   };
 
-  const renderNode = (node: FilterNode, depth: number = 0): React.ReactNode => {
+  const renderNode = (node: FilterNode, depth: number = 0, isInLayerFilter: boolean = false): React.ReactNode => {
     const canDelete = node.id !== 'root';
     const selectedType = selectedFilterTypes[node.id] || '';
-    const availableTypes = getAvailableFilterTypes(node, depth);
+    const availableTypes = getAvailableFilterTypes(node, depth, isInLayerFilter);
 
     return (
       <div key={node.id} className={styles.filterNode} style={{ marginLeft: depth * 20 }}>
@@ -665,7 +655,7 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
 
               {node.children && node.children.length > 0 && (
                 <div>
-                  {node.children.map(child => renderNode(child, depth + 1))}
+                  {node.children.map(child => renderNode(child, depth + 1, isInLayerFilter))}
                 </div>
               )}
 
@@ -840,7 +830,7 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
               <Text size={200} style={{ marginBottom: tokens.spacingVerticalS, display: 'block' }}>
                 Layer Filter Configuration:
               </Text>
-              {node.layerFilter && renderNode(node.layerFilter, depth + 1)}
+              {node.layerFilter && renderNode(node.layerFilter, depth + 1, true)}
               {!node.layerFilter && (
                 <Text size={200} italic>No layer filter set</Text>
               )}
