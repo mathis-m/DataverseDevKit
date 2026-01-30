@@ -5,6 +5,7 @@ using DataverseDevKit.Core.Abstractions;
 using DataverseDevKit.Core.Models;
 using Ddk.SolutionLayerAnalyzer.Data;
 using Ddk.SolutionLayerAnalyzer.DTOs;
+using Ddk.SolutionLayerAnalyzer.Models;
 using Ddk.SolutionLayerAnalyzer.Services;
 
 namespace Ddk.SolutionLayerAnalyzer;
