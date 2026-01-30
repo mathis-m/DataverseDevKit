@@ -453,10 +453,18 @@ public sealed class PluginHostManager : IDisposable
 
         if (!response.Success)
         {
-            throw new InvalidOperationException($"Plugin command failed: {response.ErrorMessage}");
+            var errorMessage = response.ErrorMessage ?? "Unknown error";
+            throw new InvalidOperationException($"Plugin command failed: {errorMessage}");
         }
 
         // Deserialize bytes to JsonElement to avoid double JSON encoding
+        if (response.Result == null || response.Result.IsEmpty)
+        {
+            _logger.LogWarning("Plugin command returned null or empty result for {PluginId}.{Command}", 
+                pluginId, command);
+            return JsonSerializer.Deserialize<JsonElement>("null", JsonOptions);
+        }
+
         var resultJson = response.Result.ToStringUtf8();
         return JsonSerializer.Deserialize<JsonElement>(resultJson, JsonOptions);
     }

@@ -52,7 +52,13 @@ public sealed class PluginHostGrpcService : PluginHostService.PluginHostServiceB
             }
             else
             {
-                _logger.LogWarning("No token callback socket or connection URL provided - ServiceClient will not be available");
+                var errorMsg = "Cannot initialize plugin: No active Dataverse connection. Please connect to an environment first.";
+                _logger.LogError(errorMsg);
+                return new InitializeResponse
+                {
+                    Success = false,
+                    ErrorMessage = errorMsg
+                };
             }
 
             // Create a logger for the plugin context
@@ -62,7 +68,7 @@ public sealed class PluginHostGrpcService : PluginHostService.PluginHostServiceB
                 request.StoragePath,
                 config,
                 pluginLogger,
-                _serviceClientFactory!,
+                _serviceClientFactory,
                 context.CancellationToken);
 
             var plugin = _pluginLoader.Plugin;
@@ -158,7 +164,7 @@ public sealed class PluginHostGrpcService : PluginHostService.PluginHostServiceB
             return new ExecuteResponse
             {
                 Success = false,
-                ErrorMessage = ex.Message,
+                ErrorMessage = $"{ex.Message}\n\nStack Trace:\n{ex.StackTrace}",
                 CorrelationId = request.CorrelationId
             };
         }

@@ -223,13 +223,14 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
           children: [...(node.children || []), newChild],
         };
       }
+      let updated = node;
       if (node.children) {
-        return {
-          ...node,
-          children: node.children.map(child => addToNode(child)),
-        };
+        updated = { ...updated, children: node.children.map(child => addToNode(child)) };
       }
-      return node;
+      if (node.layerFilter) {
+        updated = { ...updated, layerFilter: addToNode(node.layerFilter) };
+      }
+      return updated;
     };
 
     updateFilter(addToNode(rootFilter));
@@ -239,15 +240,21 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
 
   const removeChild = (nodeId: string) => {
     const removeFromNode = (node: FilterNode): FilterNode => {
+      let updated = node;
       if (node.children) {
-        return {
-          ...node,
+        updated = {
+          ...updated,
           children: node.children
             .filter(child => child.id !== nodeId)
             .map(child => removeFromNode(child)),
         };
       }
-      return node;
+      if (node.layerFilter) {
+        // If layerFilter itself is the target, we shouldn't remove it entirely - leave it
+        // But we should recurse into it to remove children
+        updated = { ...updated, layerFilter: removeFromNode(node.layerFilter) };
+      }
+      return updated;
     };
 
     updateFilter(removeFromNode(rootFilter));
@@ -261,13 +268,14 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
           [property]: value,
         };
       }
+      let updated = node;
       if (node.children) {
-        return {
-          ...node,
-          children: node.children.map(child => updateNode(child)),
-        };
+        updated = { ...updated, children: node.children.map(child => updateNode(child)) };
       }
-      return node;
+      if (node.layerFilter) {
+        updated = { ...updated, layerFilter: updateNode(node.layerFilter) };
+      }
+      return updated;
     };
 
     updateFilter(updateNode(rootFilter));
@@ -292,10 +300,14 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
         }
         return { ...node, sequence: newSequence };
       }
+      let updated = node;
       if (node.children) {
-        return { ...node, children: node.children.map(child => updateNode(child)) };
+        updated = { ...updated, children: node.children.map(child => updateNode(child)) };
       }
-      return node;
+      if (node.layerFilter) {
+        updated = { ...updated, layerFilter: updateNode(node.layerFilter) };
+      }
+      return updated;
     };
     updateFilter(updateNode(rootFilter));
   };
@@ -309,10 +321,14 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
         }
         return { ...node, sequence: newSequence };
       }
+      let updated = node;
       if (node.children) {
-        return { ...node, children: node.children.map(child => updateNode(child)) };
+        updated = { ...updated, children: node.children.map(child => updateNode(child)) };
       }
-      return node;
+      if (node.layerFilter) {
+        updated = { ...updated, layerFilter: updateNode(node.layerFilter) };
+      }
+      return updated;
     };
     updateFilter(updateNode(rootFilter));
   };
@@ -322,10 +338,14 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
       if (node.id === nodeId && node.sequence) {
         return { ...node, sequence: [...node.sequence, []] };
       }
+      let updated = node;
       if (node.children) {
-        return { ...node, children: node.children.map(child => updateNode(child)) };
+        updated = { ...updated, children: node.children.map(child => updateNode(child)) };
       }
-      return node;
+      if (node.layerFilter) {
+        updated = { ...updated, layerFilter: updateNode(node.layerFilter) };
+      }
+      return updated;
     };
     updateFilter(updateNode(rootFilter));
   };
@@ -336,10 +356,14 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
         const newSequence = node.sequence.filter((_: any, i: number) => i !== stepIndex);
         return { ...node, sequence: newSequence.length > 0 ? newSequence : [[]] };
       }
+      let updated = node;
       if (node.children) {
-        return { ...node, children: node.children.map(child => updateNode(child)) };
+        updated = { ...updated, children: node.children.map(child => updateNode(child)) };
       }
-      return node;
+      if (node.layerFilter) {
+        updated = { ...updated, layerFilter: updateNode(node.layerFilter) };
+      }
+      return updated;
     };
     updateFilter(updateNode(rootFilter));
   };
@@ -351,10 +375,14 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
         newSequence[stepIndex] = query;
         return { ...node, sequence: newSequence };
       }
+      let updated = node;
       if (node.children) {
-        return { ...node, children: node.children.map(child => updateNode(child)) };
+        updated = { ...updated, children: node.children.map(child => updateNode(child)) };
       }
-      return node;
+      if (node.layerFilter) {
+        updated = { ...updated, layerFilter: updateNode(node.layerFilter) };
+      }
+      return updated;
     };
     updateFilter(updateNode(rootFilter));
   };
@@ -366,10 +394,14 @@ export const AdvancedFilterBuilder: React.FC<AdvancedFilterBuilderProps> = ({
         newSequence[stepIndex] = [];
         return { ...node, sequence: newSequence };
       }
+      let updated = node;
       if (node.children) {
-        return { ...node, children: node.children.map(child => updateNode(child)) };
+        updated = { ...updated, children: node.children.map(child => updateNode(child)) };
       }
-      return node;
+      if (node.layerFilter) {
+        updated = { ...updated, layerFilter: updateNode(node.layerFilter) };
+      }
+      return updated;
     };
     updateFilter(updateNode(rootFilter));
   };
