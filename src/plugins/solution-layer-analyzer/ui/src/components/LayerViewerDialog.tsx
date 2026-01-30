@@ -69,6 +69,11 @@ const useStyles = makeStyles({
   changedBadge: {
     backgroundColor: tokens.colorPaletteYellowBackground2,
   },
+  dialogBody: {
+    display: "grid",
+    gridTemplateRows: "auto auto 1fr",
+    gridTemplateColumns: "1fr",
+  }
 });
 
 interface LayerViewerDialogProps {
@@ -183,7 +188,7 @@ export const LayerViewerDialog: React.FC<LayerViewerDialogProps> = ({
         <DialogTitle>
           View Layer: {solutionName}
         </DialogTitle>
-        <DialogBody>
+        <DialogBody className={styles.dialogBody}>
           <div className={styles.searchBar}>
             <Field label="Search attributes" style={{ flex: 1 }}>
               <Input
