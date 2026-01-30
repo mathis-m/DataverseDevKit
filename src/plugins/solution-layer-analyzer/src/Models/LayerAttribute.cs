@@ -44,6 +44,12 @@ public sealed class LayerAttribute
     public string? RawValue { get; set; }
 
     /// <summary>
+    /// Gets or sets whether this attribute was changed in this layer.
+    /// Based on presence in msdyn_changes Attributes array.
+    /// </summary>
+    public bool IsChanged { get; set; }
+
+    /// <summary>
     /// Navigation property to layer.
     /// </summary>
     public Layer Layer { get; set; } = null!;

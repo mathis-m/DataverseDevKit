@@ -25,13 +25,50 @@ public class LayerAttributeExtractor
     /// Extracts attributes from a layer's component JSON.
     /// Returns a list of LayerAttribute objects ready to be stored.
     /// </summary>
-    public List<LayerAttribute> ExtractAttributes(Guid layerId, string? componentJson)
+    /// <param name="layerId">The layer ID</param>
+    /// <param name="componentJson">The component JSON from msdyn_componentjson</param>
+    /// <param name="changes">The changes JSON from msdyn_changes (optional)</param>
+    public List<LayerAttribute> ExtractAttributes(Guid layerId, string? componentJson, string? changes = null)
     {
         var attributes = new List<LayerAttribute>();
 
         if (string.IsNullOrWhiteSpace(componentJson))
         {
             return attributes;
+        }
+
+        // Parse changes to get the set of changed attribute names
+        var changedAttributeNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(changes))
+        {
+            try
+            {
+                using var changesDoc = JsonDocument.Parse(changes);
+                var changesRoot = changesDoc.RootElement;
+
+                // Check if it's an object with Attributes array (common Dataverse format)
+                if (changesRoot.ValueKind == JsonValueKind.Object && changesRoot.TryGetProperty("Attributes", out var changesAttributesArray))
+                {
+                    if (changesAttributesArray.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in changesAttributesArray.EnumerateArray())
+                        {
+                            if (item.ValueKind == JsonValueKind.Object && item.TryGetProperty("Key", out var keyElement))
+                            {
+                                var attributeName = keyElement.GetString();
+                                if (!string.IsNullOrEmpty(attributeName))
+                                {
+                                    changedAttributeNames.Add(attributeName);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse changes JSON for layer {LayerId}", layerId);
+            }
         }
 
         try
@@ -42,12 +79,12 @@ public class LayerAttributeExtractor
             // Check if it's an object with Attributes array (common Dataverse format)
             if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("Attributes", out var attributesArray))
             {
-                ExtractFromAttributesArray(layerId, attributesArray, attributes);
+                ExtractFromAttributesArray(layerId, attributesArray, attributes, changedAttributeNames);
             }
             else
             {
                 // Otherwise, extract all properties at root level
-                ExtractFromJsonObject(layerId, root, attributes);
+                ExtractFromJsonObject(layerId, root, attributes, changedAttributeNames);
             }
         }
         catch (JsonException ex)
@@ -62,7 +99,7 @@ public class LayerAttributeExtractor
     /// Extracts attributes from a Dataverse Attributes array format.
     /// Format: { "Attributes": [{ "Key": "name", "Value": "value" }] }
     /// </summary>
-    private void ExtractFromAttributesArray(Guid layerId, JsonElement attributesArray, List<LayerAttribute> result)
+    private void ExtractFromAttributesArray(Guid layerId, JsonElement attributesArray, List<LayerAttribute> result, HashSet<string> changedAttributeNames)
     {
         if (attributesArray.ValueKind != JsonValueKind.Array)
         {
@@ -91,6 +128,7 @@ public class LayerAttributeExtractor
             var attribute = CreateLayerAttribute(layerId, attributeName, valueElement);
             if (attribute != null)
             {
+                attribute.IsChanged = changedAttributeNames.Contains(attributeName);
                 result.Add(attribute);
             }
         }
@@ -99,7 +137,7 @@ public class LayerAttributeExtractor
     /// <summary>
     /// Extracts attributes from a flat JSON object.
     /// </summary>
-    private void ExtractFromJsonObject(Guid layerId, JsonElement obj, List<LayerAttribute> result)
+    private void ExtractFromJsonObject(Guid layerId, JsonElement obj, List<LayerAttribute> result, HashSet<string> changedAttributeNames)
     {
         if (obj.ValueKind != JsonValueKind.Object)
         {
@@ -111,6 +149,7 @@ public class LayerAttributeExtractor
             var attribute = CreateLayerAttribute(layerId, property.Name, property.Value);
             if (attribute != null)
             {
+                attribute.IsChanged = changedAttributeNames.Contains(property.Name);
                 result.Add(attribute);
             }
         }

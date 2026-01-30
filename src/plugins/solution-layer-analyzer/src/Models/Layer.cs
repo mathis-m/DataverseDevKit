@@ -57,9 +57,15 @@ public sealed class Layer
     public string? ComponentJson { get; set; }
 
     /// <summary>
+    /// Gets or sets the changes JSON from msdyn_changes field.
+    /// Contains only the changed attributes for this layer.
+    /// </summary>
+    public string? Changes { get; set; }
+
+    /// <summary>
     /// Navigation property to component.
     /// </summary>
-    public Component Component { get; set; } = null!;
+    public Component Component { get; set; } = null!
 
     /// <summary>
     /// Navigation property to extracted layer attributes.
