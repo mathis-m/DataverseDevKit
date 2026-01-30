@@ -47,12 +47,20 @@ export interface DiffState {
 }
 
 export interface FilterBarState {
-  searchText: string;
-  selectedTypes: string[];
-  selectedSolutions: string[];
-  managedFilter: string;
+  /** Whether advanced filter mode is enabled */
   advancedMode: boolean;
+  /** The filter AST - single source of truth for all filter state */
   advancedFilter: FilterNode | null;
+  // Legacy fields - kept for backward compatibility with persisted state
+  // These are no longer used; simple values are derived from advancedFilter
+  /** @deprecated Use advancedFilter instead */
+  searchText?: string;
+  /** @deprecated Use advancedFilter instead */
+  selectedTypes?: string[];
+  /** @deprecated Use advancedFilter instead */
+  selectedSolutions?: string[];
+  /** @deprecated Use advancedFilter instead */
+  managedFilter?: string;
 }
 
 export interface AnalysisState {
@@ -148,10 +156,6 @@ const initialState = {
     groupBy: 'componentType' as const,
   },
   filterBarState: {
-    searchText: '',
-    selectedTypes: [],
-    selectedSolutions: [],
-    managedFilter: 'all',
     advancedMode: false,
     advancedFilter: null,
   },
