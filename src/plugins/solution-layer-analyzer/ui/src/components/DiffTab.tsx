@@ -21,6 +21,7 @@ import {
 import { DiffEditor } from '@monaco-editor/react';
 import { usePluginApi } from '../hooks/usePluginApi';
 import { useAppStore } from '../store/useAppStore';
+import { AttributeDiff as AttributeDiffType } from '../types';
 
 const useStyles = makeStyles({
   section: {
@@ -96,17 +97,6 @@ const useStyles = makeStyles({
   },
 });
 
-interface AttributeDiff {
-  key: string;
-  leftValue: any;
-  rightValue: any;
-  isDifferent: boolean;
-  onlyInLeft: boolean;
-  onlyInRight: boolean;
-  isComplex: boolean; // true if value needs Monaco editor
-  attributeType: number; // 4=Json, 5=Xml, etc.
-}
-
 interface DiffTabProps {
   initialComponentId?: string;
   initialLeftSolution?: string;
@@ -128,8 +118,7 @@ export const DiffTab: React.FC<DiffTabProps> = ({
   const [componentId, setComponentId] = useState(initialComponentId || diffState?.componentId || '');
   const [leftSolution, setLeftSolution] = useState(initialLeftSolution || diffState?.leftSolution || '');
   const [rightSolution, setRightSolution] = useState(initialRightSolution || diffState?.rightSolution || '');
-  const [leftPayload, setLeftPayload] = useState<any>(diffState?.leftPayload || null);
-  const [rightPayload, setRightPayload] = useState<any>(diffState?.rightPayload || null);
+  const [attributeDiffs, setAttributeDiffs] = useState<AttributeDiffType[]>(diffState?.attributeDiffs || []);
   const [warnings, setWarnings] = useState<string[]>(diffState?.warnings || []);
   const [searchTerm, setSearchTerm] = useState(diffState?.searchTerm || '');
 
@@ -139,12 +128,11 @@ export const DiffTab: React.FC<DiffTabProps> = ({
       componentId,
       leftSolution,
       rightSolution,
-      leftPayload,
-      rightPayload,
+      attributeDiffs,
       warnings,
       searchTerm,
     });
-  }, [componentId, leftSolution, rightSolution, leftPayload, rightPayload, warnings, searchTerm, setDiffState]);
+  }, [componentId, leftSolution, rightSolution, attributeDiffs, warnings, searchTerm, setDiffState]);
 
   // Attribute type enum values from backend
   const AttributeTypeEnum = {
@@ -160,89 +148,15 @@ export const DiffTab: React.FC<DiffTabProps> = ({
     Lookup: 9,
   };
 
-  // Parse JSON payloads and extract attributes with type info
-  const parseAttributes = (jsonText: string): Record<string, { value: any; type: number }> => {
-    try {
-      const parsed = JSON.parse(jsonText);
-      if (parsed.Attributes && Array.isArray(parsed.Attributes)) {
-        const attrs: Record<string, { value: any; type: number }> = {};
-        parsed.Attributes.forEach((attr: any) => {
-          if (attr.Key) {
-            attrs[attr.Key] = {
-              value: attr.Value,
-              type: attr.Type ?? AttributeTypeEnum.String,
-            };
-          }
-        });
-        return attrs;
-      }
-      return {};
-    } catch {
-      return {};
-    }
-  };
-
-  // Determine if value is complex (needs Monaco editor)
-  const isComplexValue = (value: any, attrType: number): boolean => {
-    // Json (4) and Xml (5) types are always complex
-    if (attrType === AttributeTypeEnum.Json || attrType === AttributeTypeEnum.Xml) return true;
-    if (value === null || value === undefined) return false;
-    if (typeof value === 'object') return true;
-    if (typeof value === 'string' && value.length > 200) return true;
-    return false;
-  };
-
-  // Compare attributes and generate diff list
-  const attributeDiffs = useMemo(() => {
-    if (!leftPayload || !rightPayload) return [];
-
-    const leftAttrs = parseAttributes(leftPayload);
-    const rightAttrs = parseAttributes(rightPayload);
-    const allKeys = new Set([...Object.keys(leftAttrs), ...Object.keys(rightAttrs)]);
-    
-    const diffs: AttributeDiff[] = [];
-    
-    allKeys.forEach(key => {
-      const leftAttr = leftAttrs[key];
-      const rightAttr = rightAttrs[key];
-      const leftValue = leftAttr?.value;
-      const rightValue = rightAttr?.value;
-      const onlyInLeft = !(key in rightAttrs);
-      const onlyInRight = !(key in leftAttrs);
-      const isDifferent = !onlyInLeft && !onlyInRight && JSON.stringify(leftValue) !== JSON.stringify(rightValue);
-      
-      // Get attribute type from either side (prefer right as it has the change)
-      const attributeType = rightAttr?.type ?? leftAttr?.type ?? AttributeTypeEnum.String;
-      
-      // Only include if there's a difference or only in one side
-      if (isDifferent || onlyInLeft || onlyInRight) {
-        diffs.push({
-          key,
-          leftValue,
-          rightValue,
-          isDifferent,
-          onlyInLeft,
-          onlyInRight,
-          isComplex: isComplexValue(leftValue, attributeType) || isComplexValue(rightValue, attributeType),
-          attributeType,
-        });
-      }
-    });
-    
-    return diffs.sort((a, b) => a.key.localeCompare(b.key));
-  }, [leftPayload, rightPayload]);
-
   // Filter diffs based on search term
   const filteredDiffs = useMemo(() => {
     if (!searchTerm) return attributeDiffs;
     
     const term = searchTerm.toLowerCase();
     return attributeDiffs.filter(diff => {
-      const keyMatch = diff.key.toLowerCase().includes(term);
-      const leftValueStr = typeof diff.leftValue === 'object' ? JSON.stringify(diff.leftValue) : String(diff.leftValue || '');
-      const rightValueStr = typeof diff.rightValue === 'object' ? JSON.stringify(diff.rightValue) : String(diff.rightValue || '');
-      const leftValueMatch = leftValueStr.toLowerCase().includes(term);
-      const rightValueMatch = rightValueStr.toLowerCase().includes(term);
+      const keyMatch = diff.attributeName.toLowerCase().includes(term);
+      const leftValueMatch = diff.leftValue?.toLowerCase().includes(term);
+      const rightValueMatch = diff.rightValue?.toLowerCase().includes(term);
       return keyMatch || leftValueMatch || rightValueMatch;
     });
   }, [attributeDiffs, searchTerm]);
@@ -252,8 +166,7 @@ export const DiffTab: React.FC<DiffTabProps> = ({
 
     try {
       const result = await diffComponentLayers(componentId, leftSolution, rightSolution);
-      setLeftPayload(result.leftText || '{}');
-      setRightPayload(result.rightText || '{}');
+      setAttributeDiffs(result.attributes || []);
       setWarnings(result.warnings || []);
     } catch (error) {
       console.error('Diff failed:', error);
@@ -268,13 +181,13 @@ export const DiffTab: React.FC<DiffTabProps> = ({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Render simple diff (for primitive values)
-  const renderSimpleDiff = (diff: AttributeDiff) => {
+  const renderSimpleDiff = (diff: AttributeDiffType) => {
     if (diff.onlyInLeft) {
       return (
         <div className={styles.simpleDiff}>
           <div className={`${styles.diffValue} ${styles.leftValue}`}>
             <Text size={200} weight="semibold">Left ({leftSolution}):</Text>
-            <Text size={200}>{String(diff.leftValue)}</Text>
+            <Text size={200}>{diff.leftValue || '(null)'}</Text>
           </div>
           <div className={`${styles.diffValue} ${styles.onlyLeft}`}>
             <Text size={200} weight="semibold">Right ({rightSolution}):</Text>
@@ -293,7 +206,7 @@ export const DiffTab: React.FC<DiffTabProps> = ({
           </div>
           <div className={`${styles.diffValue} ${styles.rightValue}`}>
             <Text size={200} weight="semibold">Right ({rightSolution}):</Text>
-            <Text size={200}>{String(diff.rightValue)}</Text>
+            <Text size={200}>{diff.rightValue || '(null)'}</Text>
           </div>
         </div>
       );
@@ -303,32 +216,26 @@ export const DiffTab: React.FC<DiffTabProps> = ({
       <div className={styles.simpleDiff}>
         <div className={`${styles.diffValue} ${styles.leftValue}`}>
           <Text size={200} weight="semibold">Left ({leftSolution}):</Text>
-          <Text size={200}>{String(diff.leftValue)}</Text>
+          <Text size={200}>{diff.leftValue || '(null)'}</Text>
         </div>
         <div className={`${styles.diffValue} ${styles.rightValue}`}>
           <Text size={200} weight="semibold">Right ({rightSolution}):</Text>
-          <Text size={200}>{String(diff.rightValue)}</Text>
+          <Text size={200}>{diff.rightValue || '(null)'}</Text>
         </div>
       </div>
     );
   };
 
   // Render Monaco diff (for complex values)
-  const renderMonacoDiff = (diff: AttributeDiff) => {
-    const leftText = diff.leftValue 
-      ? (typeof diff.leftValue === 'object' ? JSON.stringify(diff.leftValue, null, 2) : String(diff.leftValue))
-      : '';
-    const rightText = diff.rightValue 
-      ? (typeof diff.rightValue === 'object' ? JSON.stringify(diff.rightValue, null, 2) : String(diff.rightValue))
-      : '';
+  const renderMonacoDiff = (diff: AttributeDiffType) => {
+    const leftText = diff.leftValue || '';
+    const rightText = diff.rightValue || '';
     
     // Determine language from attribute type (5=Xml, 4=Json)
     let language = 'plaintext';
     if (diff.attributeType === AttributeTypeEnum.Xml) {
       language = 'xml';
     } else if (diff.attributeType === AttributeTypeEnum.Json) {
-      language = 'json';
-    } else if (typeof diff.leftValue === 'object' || typeof diff.rightValue === 'object') {
       language = 'json';
     } else {
       // Fallback heuristic for content that wasn't typed
@@ -443,7 +350,7 @@ export const DiffTab: React.FC<DiffTabProps> = ({
           </Card>
         )}
 
-        {leftPayload && rightPayload && (
+        {attributeDiffs.length > 0 && (
           <>
             <Divider />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -472,9 +379,9 @@ export const DiffTab: React.FC<DiffTabProps> = ({
             ) : (
               <div className={styles.attributesList}>
                 {filteredDiffs.map((diff) => (
-                  <div key={diff.key} className={styles.attributeItem}>
+                  <div key={diff.attributeName} className={styles.attributeItem}>
                     <div className={styles.attributeHeader}>
-                      <Text weight="semibold" size={300}>{diff.key}</Text>
+                      <Text weight="semibold" size={300}>{diff.attributeName}</Text>
                       <div style={{ display: 'flex', gap: tokens.spacingHorizontalXS }}>
                         {diff.onlyInLeft && (
                           <Badge appearance="filled" color="danger">Only in {leftSolution}</Badge>

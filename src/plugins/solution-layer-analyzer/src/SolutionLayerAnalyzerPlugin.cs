@@ -462,116 +462,86 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 
         var connectionId = request.ConnectionId ?? string.Empty;
 
-        // Get component data with attributes within lock
-        Models.Component component;
-        Layer? leftLayer = null;
-        Layer? rightLayer = null;
-        List<LayerAttribute> leftAttributes = new();
-        List<LayerAttribute> rightAttributes = new();
-
+        // Get component data with attributes
         await using var dbContext = CreateDbContext(connectionId);
-        var found = await dbContext.Components
+        var component = await dbContext.Components
             .Include(c => c.Layers)
             .ThenInclude(l => l.Attributes)
             .FirstOrDefaultAsync(c => c.ComponentId == request.ComponentId, cancellationToken);
 
-        if (found == null)
+        if (component == null)
         {
             throw new InvalidOperationException($"Component not found: {request.ComponentId}");
         }
-        component = found;
 
         // Find left and right layers
-        leftLayer = component.Layers.FirstOrDefault(l => l.SolutionName == request.Left.SolutionName);
-        rightLayer = component.Layers.FirstOrDefault(l => l.SolutionName == request.Right.SolutionName);
+        var leftLayer = component.Layers.FirstOrDefault(l => l.SolutionName == request.Left.SolutionName);
+        var rightLayer = component.Layers.FirstOrDefault(l => l.SolutionName == request.Right.SolutionName);
 
-        // Get attributes
-        if (leftLayer != null)
-        {
-            leftAttributes = leftLayer.Attributes.ToList();
-        }
-        if (rightLayer != null)
-        {
-            rightAttributes = rightLayer.Attributes.ToList();
-        }
-
-        // Get ServiceClient for payload retrieval
-        var serviceClient = _context.ServiceClientFactory.GetServiceClient(request.ConnectionId);
-        var payloadService = new PayloadService(serviceClient, _context.Logger);
-
-        // Build filtered JSON payloads based on changed attributes
-        string? leftText = null;
-        string? rightText = null;
         var warnings = new List<string>();
 
-        if (leftLayer == null || rightLayer == null)
+        if (leftLayer == null)
         {
-            // Fallback to old behavior if layers not found
-            if (leftLayer?.ComponentJson != null)
-            {
-                var (leftPayload, _) = payloadService.RetrievePayloadFromComponentJson(leftLayer.ComponentJson);
-                leftText = leftPayload;
-            }
-            else
-            {
-                warnings.Add($"Could not retrieve payload for left solution: {request.Left.SolutionName}");
-                leftText = "// Payload not available";
-            }
-
-            if (rightLayer?.ComponentJson != null)
-            {
-                var (rightPayload, _) = payloadService.RetrievePayloadFromComponentJson(rightLayer.ComponentJson);
-                rightText = rightPayload;
-            }
-            else
-            {
-                warnings.Add($"Could not retrieve payload for right solution: {request.Right.SolutionName}");
-                rightText = "// Payload not available";
-            }
+            warnings.Add($"Left solution layer not found: {request.Left.SolutionName}");
         }
-        else
+
+        if (rightLayer == null)
         {
-            // New behavior: use LayerAttributes table to filter only changed attributes
-            // Get all right side attributes where IsChanged = true
+            warnings.Add($"Right solution layer not found: {request.Right.SolutionName}");
+        }
+
+        // Build attribute diffs
+        var attributeDiffs = new List<AttributeDiff>();
+
+        if (leftLayer != null && rightLayer != null)
+        {
+            var leftAttributes = leftLayer.Attributes.ToList();
+            var rightAttributes = rightLayer.Attributes.ToList();
+
+            // Get all changed attributes from right layer
             var changedRightAttributes = rightAttributes.Where(a => a.IsChanged).ToList();
 
             if (changedRightAttributes.Count == 0)
             {
-                warnings.Add("No changed attributes detected in right layer. This may indicate the layer has no changes tracked. Showing full component JSON for comparison.");
-                // Fallback to full payload if no changes tracked
-                if (!string.IsNullOrEmpty(leftLayer.ComponentJson))
-                {
-                    var (leftPayload, _) = payloadService.RetrievePayloadFromComponentJson(leftLayer.ComponentJson);
-                    leftText = leftPayload;
-                }
-                else
-                {
-                    leftText = "{}";
-                }
-
-                if (!string.IsNullOrEmpty(rightLayer.ComponentJson))
-                {
-                    var (rightPayload, _) = payloadService.RetrievePayloadFromComponentJson(rightLayer.ComponentJson);
-                    rightText = rightPayload;
-                }
-                else
-                {
-                    rightText = "{}";
-                }
+                warnings.Add("No changed attributes detected in right layer. This may indicate the layer has no changes tracked.");
             }
             else
             {
-                // Build filtered JSON with only changed attributes
-                leftText = BuildFilteredPayload(leftAttributes, changedRightAttributes);
-                rightText = BuildFilteredPayload(rightAttributes, changedRightAttributes);
+                // Build diffs for changed attributes
+                foreach (var changedAttr in changedRightAttributes.Where(a => !ExcludedDiffAttributes.Contains(a.AttributeName)))
+                {
+                    var leftAttr = leftAttributes.FirstOrDefault(a =>
+                        string.Equals(a.AttributeName, changedAttr.AttributeName, StringComparison.OrdinalIgnoreCase));
+
+                    var leftValue = leftAttr?.AttributeValue;
+                    var rightValue = changedAttr.AttributeValue;
+
+                    var isDifferent = leftValue != rightValue;
+                    var onlyInLeft = false; // changedAttr comes from right, so it can't be only in left
+                    var onlyInRight = leftAttr == null;
+
+                    // Only include if there's actually a difference
+                    if (isDifferent || onlyInRight)
+                    {
+                        attributeDiffs.Add(new AttributeDiff
+                        {
+                            AttributeName = changedAttr.AttributeName,
+                            LeftValue = leftValue,
+                            RightValue = rightValue,
+                            AttributeType = (int)changedAttr.AttributeType,
+                            IsComplex = changedAttr.IsComplexValue || (leftAttr?.IsComplexValue ?? false),
+                            OnlyInLeft = onlyInLeft,
+                            OnlyInRight = onlyInRight,
+                            IsDifferent = isDifferent
+                        });
+                    }
+                }
             }
         }
 
         var response = new DiffResponse
         {
-            LeftText = leftText ?? string.Empty,
-            RightText = rightText ?? string.Empty,
-            Mime = "application/json",
+            Attributes = attributeDiffs,
             Warnings = warnings
         };
 
@@ -600,68 +570,6 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         "showrecents",
         "showpinned",
     };
-
-    /// <summary>
-    /// Builds a filtered JSON payload containing only the specified attributes.
-    /// </summary>
-    private string BuildFilteredPayload(List<LayerAttribute> allAttributes, List<LayerAttribute> changedAttributes)
-    {
-        var attributesDict = new Dictionary<string, object?>();
-
-        // For each changed attribute, find it in allAttributes by name (excluding system attributes)
-        foreach (var changedAttr in changedAttributes.Where(a => !ExcludedDiffAttributes.Contains(a.AttributeName)))
-        {
-            var matchingAttr = allAttributes.FirstOrDefault(a =>
-                string.Equals(a.AttributeName, changedAttr.AttributeName, StringComparison.OrdinalIgnoreCase));
-
-            if (matchingAttr != null)
-            {
-                var value = matchingAttr.AttributeValue ?? matchingAttr.RawValue;
-
-                // Try to parse complex types back to objects for proper JSON serialization
-                if (matchingAttr.IsComplexValue && !string.IsNullOrEmpty(value))
-                {
-                    try
-                    {
-                        // Try parsing and deserializing as JSON
-                        attributesDict[matchingAttr.AttributeName] = JsonSerializer.Deserialize<object>(value);
-                    }
-                    catch (JsonException ex)
-                    {
-                        // If JSON parsing fails, log and use the string value
-                        _context!.Logger.LogDebug(ex, "Failed to parse complex value as JSON for attribute {AttributeName}", matchingAttr.AttributeName);
-                        attributesDict[matchingAttr.AttributeName] = value;
-                    }
-                }
-                else
-                {
-                    attributesDict[matchingAttr.AttributeName] = value;
-                }
-            }
-            else
-            {
-                // Attribute is in changed list but not in this layer (was added/removed)
-                attributesDict[changedAttr.AttributeName] = null;
-            }
-        }
-
-        // Create the standard Dataverse format with Attributes array, including type info
-        var attributeTypeMap = allAttributes.ToDictionary(a => a.AttributeName, a => (int)a.AttributeType, StringComparer.OrdinalIgnoreCase);
-        var result = new
-        {
-            Attributes = attributesDict.Select(kvp => new
-            {
-                Key = kvp.Key,
-                Value = kvp.Value,
-                Type = attributeTypeMap.TryGetValue(kvp.Key, out var attrType) ? attrType : 0
-            }).ToList()
-        };
-
-        return JsonSerializer.Serialize(result, new JsonSerializerOptions
-        {
-            WriteIndented = true
-        });
-    }
 
     private async Task<JsonElement> ExecuteClearAsync(string payload, CancellationToken cancellationToken)
     {

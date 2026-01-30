@@ -103,14 +103,14 @@ export const usePluginApi = () => {
     leftSolution: string,
     rightSolution: string,
     connectionId: string = 'default'
-  ): Promise<{ leftText: string; rightText: string; mime: string; warnings?: string[] }> => {
+  ): Promise<{ attributes: AttributeDiff[]; warnings?: string[] }> => {
     setDiffing(true);
     try {
       const payload = JSON.stringify({
         componentId,
         connectionId,
-        left: { solutionName: leftSolution, payloadType: 'auto' },
-        right: { solutionName: rightSolution, payloadType: 'auto' },
+        left: { solutionName: leftSolution },
+        right: { solutionName: rightSolution },
       });
       
       const result: any = await hostBridge.invokePluginCommand(PLUGIN_ID, 'diff', payload);

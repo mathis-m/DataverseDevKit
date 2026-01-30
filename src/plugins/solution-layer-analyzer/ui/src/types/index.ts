@@ -130,3 +130,14 @@ export interface FilterOptions {
   managed?: boolean;
   searchText: string;
 }
+
+export interface AttributeDiff {
+  attributeName: string;
+  leftValue?: string;
+  rightValue?: string;
+  attributeType: number;
+  isComplex: boolean;
+  onlyInLeft: boolean;
+  onlyInRight: boolean;
+  isDifferent: boolean;
+}
