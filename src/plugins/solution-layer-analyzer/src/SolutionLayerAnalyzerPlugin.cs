@@ -536,6 +536,28 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
                         });
                     }
                 }
+                
+                // Also check for attributes that exist in left but not in right (removed attributes)
+                var rightAttributeNames = new HashSet<string>(
+                    rightAttributes.Select(a => a.AttributeName), 
+                    StringComparer.OrdinalIgnoreCase);
+                
+                foreach (var leftAttr in leftAttributes.Where(a => 
+                    !ExcludedDiffAttributes.Contains(a.AttributeName) && 
+                    !rightAttributeNames.Contains(a.AttributeName)))
+                {
+                    attributeDiffs.Add(new AttributeDiff
+                    {
+                        AttributeName = leftAttr.AttributeName,
+                        LeftValue = leftAttr.AttributeValue,
+                        RightValue = null,
+                        AttributeType = (int)leftAttr.AttributeType,
+                        IsComplex = leftAttr.IsComplexValue,
+                        OnlyInLeft = true,
+                        OnlyInRight = false,
+                        IsDifferent = false
+                    });
+                }
             }
         }
 

@@ -155,8 +155,8 @@ export const DiffTab: React.FC<DiffTabProps> = ({
     const term = searchTerm.toLowerCase();
     return attributeDiffs.filter(diff => {
       const keyMatch = diff.attributeName.toLowerCase().includes(term);
-      const leftValueMatch = diff.leftValue?.toLowerCase().includes(term);
-      const rightValueMatch = diff.rightValue?.toLowerCase().includes(term);
+      const leftValueMatch = (diff.leftValue ?? '').toLowerCase().includes(term);
+      const rightValueMatch = (diff.rightValue ?? '').toLowerCase().includes(term);
       return keyMatch || leftValueMatch || rightValueMatch;
     });
   }, [attributeDiffs, searchTerm]);
