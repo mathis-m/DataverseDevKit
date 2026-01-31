@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "dev:federation": "pnpm run --parallel /^federation:/",
+    "federation:build": "vite build --watch",
+    "federation:dev": "vite dev",
     "preview": "vite preview",
     "type-check": "tsc --noEmit"
   },

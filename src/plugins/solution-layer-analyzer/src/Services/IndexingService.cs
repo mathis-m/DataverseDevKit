@@ -600,4 +600,46 @@ public class IndexingService
             _ => componentType
         };
     }
+
+    /// <summary>
+    /// Gets metadata about the current index including source and target solutions.
+    /// </summary>
+    public static async Task<IndexMetadataResponse> GetIndexMetadataAsync(
+        DbContextOptions<AnalyzerDbContext> dbContextOptions,
+        CancellationToken cancellationToken)
+    {
+        await using var dbContext = new AnalyzerDbContext(dbContextOptions);
+
+        var solutionCount = await dbContext.Solutions.CountAsync(cancellationToken);
+        if (solutionCount == 0)
+        {
+            return new IndexMetadataResponse { HasIndex = false };
+        }
+
+        var sourceSolutions = await dbContext.Solutions
+            .Where(s => s.IsSource)
+            .Select(s => s.UniqueName)
+            .ToListAsync(cancellationToken);
+
+        var targetSolutions = await dbContext.Solutions
+            .Where(s => s.IsTarget)
+            .Select(s => s.UniqueName)
+            .ToListAsync(cancellationToken);
+
+        var componentCount = await dbContext.Components.CountAsync(cancellationToken);
+        var layerCount = await dbContext.Layers.CountAsync(cancellationToken);
+
+        return new IndexMetadataResponse
+        {
+            HasIndex = true,
+            SourceSolutions = sourceSolutions,
+            TargetSolutions = targetSolutions,
+            Stats = new IndexStats
+            {
+                Solutions = solutionCount,
+                Components = componentCount,
+                Layers = layerCount
+            }
+        };
+    }
 }

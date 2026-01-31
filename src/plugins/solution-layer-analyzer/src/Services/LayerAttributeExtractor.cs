@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -208,6 +210,9 @@ public class LayerAttributeExtractor
                     return null;
             }
 
+            // Compute attribute hash for efficient cross-layer comparison
+            attribute.AttributeHash = ComputeAttributeHash(attribute.AttributeName, attribute.RawValue);
+
             return attribute;
         }
         catch (Exception ex)
@@ -371,5 +376,18 @@ public class LayerAttributeExtractor
         {
             return element.GetRawText();
         }
+    }
+
+    /// <summary>
+    /// Computes a hash of the attribute name and raw value for efficient cross-layer comparison.
+    /// Returns a 40-character hex string (truncated SHA256).
+    /// </summary>
+    private static string ComputeAttributeHash(string attributeName, string? rawValue)
+    {
+        var input = $"{attributeName}|{rawValue ?? ""}";
+        var inputBytes = Encoding.UTF8.GetBytes(input);
+        var hashBytes = SHA256.HashData(inputBytes);
+        // Take first 20 bytes (40 hex chars) for reasonable uniqueness with smaller storage
+        return Convert.ToHexString(hashBytes, 0, 20);
     }
 }

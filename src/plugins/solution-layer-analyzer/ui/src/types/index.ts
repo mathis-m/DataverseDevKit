@@ -59,6 +59,16 @@ export enum AttributeTarget {
   TableLogicalName = 'TableLogicalName'
 }
 
+export enum AttributeDiffTargetMode {
+  Specific = 'Specific',
+  AllBelow = 'AllBelow'
+}
+
+export enum AttributeMatchLogic {
+  Any = 'Any',
+  All = 'All'
+}
+
 export interface SolutionQueryNode {
   attribute: string;
   operator: StringOperator;
@@ -78,6 +88,14 @@ export interface FilterNode {
   value?: string;
   // Nested query properties
   layerFilter?: FilterNode; // For LAYER_QUERY
+  attributeFilter?: FilterNode; // For LAYER_ATTRIBUTE_QUERY - nested filter for layer attributes
+  // HAS_ATTRIBUTE_DIFF filter properties
+  sourceSolution?: string;
+  targetMode?: AttributeDiffTargetMode;
+  targetSolutions?: string[];
+  onlyChangedAttributes?: boolean;
+  attributeNames?: string[];
+  attributeMatchLogic?: AttributeMatchLogic;
   // Source identifier for correlating simple filter UI controls with their AST representation
   // Used to find/update specific nodes when simple filter values change
   sourceId?: 'simple-search' | 'simple-types' | 'simple-solutions' | 'simple-managed' | string;
@@ -119,6 +137,53 @@ export interface IndexCompletionEvent {
     layers: number;
   };
   warnings?: string[];
+  errorMessage?: string;
+}
+
+export interface IndexMetadata {
+  hasIndex: boolean;
+  sourceSolutions: string[];
+  targetSolutions: string[];
+  stats?: {
+    solutions: number;
+    components: number;
+    layers: number;
+  };
+}
+
+/**
+ * Query execution statistics for diagnostics.
+ */
+export interface QueryPlanStats {
+  preFetchDurationMs?: number;
+  sqlQueryDurationMs?: number;
+  inMemoryFilterDurationMs?: number;
+  totalDurationMs?: number;
+  rowsFromSql?: number;
+  rowsAfterFilter?: number;
+  filterEfficiency?: number;
+  usedInMemoryFilter?: boolean;
+  planDescription?: string;
+}
+
+/**
+ * Acknowledgment returned when using event-based queries.
+ */
+export interface QueryAcknowledgment {
+  queryId: string;
+  started: boolean;
+  errorMessage?: string;
+}
+
+/**
+ * Event payload for query results when using event-based responses.
+ */
+export interface QueryResultEvent {
+  queryId: string;
+  success: boolean;
+  rows?: ComponentResult[];
+  total?: number;
+  stats?: QueryPlanStats;
   errorMessage?: string;
 }
 

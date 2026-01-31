@@ -125,6 +125,12 @@ function analyzeFilterComplexity(filter: FilterNode | null): FilterComplexityInf
       case 'SOLUTION_QUERY':
         hiddenConditions.push(`Solution query: ${node.attribute} ${node.operator} "${node.value}"`);
         break;
+      case 'LAYER_ATTRIBUTE_QUERY':
+        hiddenConditions.push(`Layer attribute query on solution: ${node.solution}`);
+        break;
+      case 'HAS_RELEVANT_CHANGES':
+        hiddenConditions.push('Layer has relevant changes (non-system attributes)');
+        break;
       case 'NOT':
         if (!node.sourceId) {
           hiddenConditions.push('NOT condition');
@@ -148,6 +154,9 @@ function analyzeFilterComplexity(filter: FilterNode | null): FilterComplexityInf
     }
     if (node.layerFilter) {
       walk(node.layerFilter, depth + 1);
+    }
+    if (node.attributeFilter) {
+      walk(node.attributeFilter, depth + 1);
     }
   };
 

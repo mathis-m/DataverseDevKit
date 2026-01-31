@@ -50,6 +50,12 @@ public sealed class LayerAttribute
     public bool IsChanged { get; set; }
 
     /// <summary>
+    /// Gets or sets the hash of AttributeName + RawValue for efficient cross-layer comparison.
+    /// Computed as SHA256 hash truncated to 40 hex characters.
+    /// </summary>
+    public string? AttributeHash { get; set; }
+
+    /// <summary>
     /// Navigation property to layer.
     /// </summary>
     public Layer Layer { get; set; } = null!;

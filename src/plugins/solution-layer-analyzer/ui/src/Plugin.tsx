@@ -7,6 +7,7 @@ import {
   Tab,
   TabList,
   shorthands,
+  mergeClasses
 } from '@fluentui/react-components';
 import {
   DatabaseRegular,
@@ -29,19 +30,18 @@ import { hostBridge } from '@ddk/host-sdk';
 
 const useStyles = makeStyles({
   wrapper: {
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100vh',
-    overflow: 'hidden',
+    display: 'grid',
+    gridTemplateRows: '1fr auto',
+    gridTemplateColumns: '1fr',
+    height: '100%',
   },
   container: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalL,
-    ...shorthands.padding(tokens.spacingVerticalL),
-    flex: 1,
+    paddingBlock: tokens.spacingVerticalL,
+    paddingInline: tokens.spacingHorizontalL,
     overflowY: 'auto',
-    paddingBottom: '60px', // Extra space for progress footer
   },
   header: {
     display: 'flex',
@@ -63,12 +63,40 @@ const useStyles = makeStyles({
   },
 });
 
+const useGlobalStyles = makeStyles({
+  root: {
+    height: '100%',
+    ':global(*)': {
+      scrollbarWidth: 'thin',
+      scrollbarColor: `${tokens.colorNeutralStroke1} ${tokens.colorNeutralBackground1}`,
+    },
+    ':global(*::-webkit-scrollbar)': {
+      width: '8px',
+      height: '8px',
+    },
+    ':global(*::-webkit-scrollbar-track)': {
+      background: tokens.colorNeutralBackground1,
+      borderRadius: tokens.borderRadiusMedium,
+    },
+    ':global(*::-webkit-scrollbar-thumb)': {
+      background: tokens.colorNeutralStroke1,
+      borderRadius: tokens.borderRadiusMedium,
+      border: `2px solid ${tokens.colorNeutralBackground1}`,
+    },
+    ':global(*::-webkit-scrollbar-thumb:hover)': {
+      background: tokens.colorNeutralStroke1Hover,
+    },
+  },
+});
+
 interface PluginProps {
   instanceId: string;
 }
 
 const Plugin: React.FC<PluginProps> = ({ instanceId }) => {
   const styles = useStyles();
+  const globalStyles = useGlobalStyles();
+
   
   const [indexStats, setIndexStats] = useState<IndexStats | null>(null);
   
@@ -169,7 +197,7 @@ const Plugin: React.FC<PluginProps> = ({ instanceId }) => {
   };
 
   return (
-    <div className={styles.wrapper}>
+    <div className={mergeClasses(globalStyles.root, styles.wrapper)}>
       <div className={styles.container}>
         <div className={styles.header}>
           <div className={styles.headerContent}>

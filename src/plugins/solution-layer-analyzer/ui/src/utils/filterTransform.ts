@@ -1,4 +1,4 @@
-import { FilterNode, SolutionQueryNode, AttributeTarget, StringOperator } from '../types';
+import { FilterNode, SolutionQueryNode, AttributeTarget, StringOperator, AttributeDiffTargetMode, AttributeMatchLogic } from '../types';
 
 /**
  * Represents for the filter node format expected by the C# backend.
@@ -23,6 +23,15 @@ export interface BackendFilterNode {
   isManaged?: boolean;
   // LAYER_QUERY property
   layerFilter?: BackendFilterNode;
+  // LAYER_ATTRIBUTE_QUERY property
+  attributeFilter?: BackendFilterNode;
+  // HAS_ATTRIBUTE_DIFF filter properties
+  sourceSolution?: string;
+  targetMode?: AttributeDiffTargetMode;
+  targetSolutions?: string[];
+  onlyChangedAttributes?: boolean;
+  attributeNames?: string[];
+  attributeMatchLogic?: AttributeMatchLogic;
 }
 
 /**
@@ -37,7 +46,7 @@ export function transformFilterForBackend(filter: FilterNode | null): BackendFil
     return null;
   }
 
-  const { id, children, layerFilter, ...rest } = filter;
+  const { id, children, layerFilter, attributeFilter, ...rest } = filter;
 
   const result: BackendFilterNode = { ...rest };
 
@@ -50,6 +59,11 @@ export function transformFilterForBackend(filter: FilterNode | null): BackendFil
   // Handle LAYER_QUERY - recursively transform the nested layer filter
   if (filter.type === 'LAYER_QUERY' && layerFilter) {
     result.layerFilter = transformFilterForBackend(layerFilter) ?? undefined;
+  }
+
+  // Handle LAYER_ATTRIBUTE_QUERY - recursively transform the nested attribute filter
+  if (filter.type === 'LAYER_ATTRIBUTE_QUERY' && attributeFilter) {
+    result.attributeFilter = transformFilterForBackend(attributeFilter) ?? undefined;
   }
 
   if (filter.type === 'NOT') {

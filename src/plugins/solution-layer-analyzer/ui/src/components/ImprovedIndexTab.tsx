@@ -52,17 +52,34 @@ interface IndexTabProps {
 
 export const ImprovedIndexTab: React.FC<IndexTabProps> = ({ onIndexComplete }) => {
   const styles = useStyles();
-  const { indexSolutions, clearIndex, loading, indexCompletion } = usePluginApi();
+  const { indexSolutions, clearIndex, loading, indexCompletion, getIndexMetadata } = usePluginApi();
   
   // Get solutions and component types from global store
-  const { availableSolutions, availableComponentTypes, metadataLoaded } = useAppStore();
+  const { availableSolutions, availableComponentTypes, metadataLoaded, setIndexMetadata } = useAppStore();
   
   const [selectedSourceSolutions, setSelectedSourceSolutions] = useState<string[]>([]);
   const [selectedTargetSolutions, setSelectedTargetSolutions] = useState<string[]>([]);
   const [selectedComponentTypes, setSelectedComponentTypes] = useState<string[]>([]);
+  const [metadataLoadAttempted, setMetadataLoadAttempted] = useState(false);
   
   const [operationId, setOperationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Load index metadata on mount to populate selections from existing index
+  useEffect(() => {
+    if (metadataLoaded && !metadataLoadAttempted) {
+      setMetadataLoadAttempted(true);
+      getIndexMetadata().then((metadata) => {
+        setIndexMetadata(metadata);
+        if (metadata.hasIndex) {
+          setSelectedSourceSolutions(metadata.sourceSolutions);
+          setSelectedTargetSolutions(metadata.targetSolutions);
+        }
+      }).catch((err) => {
+        console.error('Failed to load index metadata:', err);
+      });
+    }
+  }, [metadataLoaded, metadataLoadAttempted, getIndexMetadata, setIndexMetadata]);
 
   // Set all component types as selected by default once loaded
   useEffect(() => {

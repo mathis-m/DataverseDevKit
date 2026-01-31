@@ -8,6 +8,12 @@ namespace Ddk.SolutionLayerAnalyzer.DTOs;
 public sealed record QueryRequest
 {
     /// <summary>
+    /// Gets the unique query ID for correlating requests with responses.
+    /// Used by the frontend to ignore stale results from superseded queries.
+    /// </summary>
+    public string? QueryId { get; init; }
+
+    /// <summary>
     /// Gets the connection ID for identifying the database.
     /// </summary>
     public string ConnectionId { get; init; } = string.Empty;
@@ -36,6 +42,17 @@ public sealed record QueryRequest
     /// Gets the sort settings.
     /// </summary>
     public List<SortSettings> Sort { get; init; } = new();
+
+    /// <summary>
+    /// Gets the query plan options (optional).
+    /// </summary>
+    public QueryPlanOptions? PlanOptions { get; init; }
+
+    /// <summary>
+    /// When true, the query result will be emitted as an event instead of returned directly.
+    /// The frontend should listen for 'plugin:sla:query-result' events.
+    /// </summary>
+    public bool UseEventResponse { get; init; }
 }
 
 /// <summary>
@@ -76,6 +93,11 @@ public sealed record SortSettings
 public sealed record QueryResponse
 {
     /// <summary>
+    /// Gets the query ID from the request (for correlation).
+    /// </summary>
+    public string? QueryId { get; init; }
+
+    /// <summary>
     /// Gets the result rows.
     /// </summary>
     public List<ComponentResult> Rows { get; init; } = new();
@@ -84,6 +106,69 @@ public sealed record QueryResponse
     /// Gets the total count.
     /// </summary>
     public int Total { get; init; }
+
+    /// <summary>
+    /// Gets the query execution statistics (optional, for diagnostics).
+    /// </summary>
+    public QueryPlanStats? Stats { get; init; }
+}
+
+/// <summary>
+/// Event payload for query results when using event-based responses.
+/// </summary>
+public sealed record QueryResultEvent
+{
+    /// <summary>
+    /// Gets the query ID for correlation.
+    /// </summary>
+    public string QueryId { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets whether the query succeeded.
+    /// </summary>
+    public bool Success { get; init; }
+
+    /// <summary>
+    /// Gets the result rows (when successful).
+    /// </summary>
+    public List<ComponentResult>? Rows { get; init; }
+
+    /// <summary>
+    /// Gets the total count (when successful).
+    /// </summary>
+    public int Total { get; init; }
+
+    /// <summary>
+    /// Gets the query execution statistics (optional).
+    /// </summary>
+    public QueryPlanStats? Stats { get; init; }
+
+    /// <summary>
+    /// Gets the error message (when failed).
+    /// </summary>
+    public string? ErrorMessage { get; init; }
+}
+
+/// <summary>
+/// Acknowledgment response when using event-based queries.
+/// Returned immediately to confirm the query was started.
+/// </summary>
+public sealed record QueryAcknowledgment
+{
+    /// <summary>
+    /// Gets the query ID.
+    /// </summary>
+    public string QueryId { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets whether the query was started.
+    /// </summary>
+    public bool Started { get; init; }
+
+    /// <summary>
+    /// Gets any immediate error message (e.g., invalid request).
+    /// </summary>
+    public string? ErrorMessage { get; init; }
 }
 
 /// <summary>

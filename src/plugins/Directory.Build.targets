@@ -17,8 +17,7 @@
     
     <!-- Copy all build output to backend folder (CopyLocalLockFileAssemblies ensures all NuGet deps are in output) -->
     <ItemGroup>
-      <PluginOutputFiles Include="$(OutputPath)**\*.*" 
-                         Exclude="$(OutputPath)**\*.pdb" />
+      <PluginOutputFiles Include="$(OutputPath)**\*.*" />
     </ItemGroup>
     
     <Copy SourceFiles="@(PluginOutputFiles)" 

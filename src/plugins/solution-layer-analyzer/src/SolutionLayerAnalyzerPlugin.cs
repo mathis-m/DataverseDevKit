@@ -7,6 +7,7 @@ using Ddk.SolutionLayerAnalyzer.Data;
 using Ddk.SolutionLayerAnalyzer.DTOs;
 using Ddk.SolutionLayerAnalyzer.Models;
 using Ddk.SolutionLayerAnalyzer.Services;
+using Ddk.SolutionLayerAnalyzer.Filters;
 
 namespace Ddk.SolutionLayerAnalyzer;
 
@@ -350,6 +351,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             "fetchSolutions" => await ExecuteFetchSolutionsAsync(payload, cancellationToken),
             "getComponentTypes" => await ExecuteGetComponentTypesAsync(cancellationToken),
             "getAnalytics" => await ExecuteGetAnalyticsAsync(payload, cancellationToken),
+            "getIndexMetadata" => await ExecuteGetIndexMetadataAsync(payload, cancellationToken),
             "saveIndexConfig" => await ExecuteSaveIndexConfigAsync(payload, cancellationToken),
             "loadIndexConfigs" => await ExecuteLoadIndexConfigsAsync(payload, cancellationToken),
             "saveFilterConfig" => await ExecuteSaveFilterConfigAsync(payload, cancellationToken),
@@ -400,14 +402,87 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         var request = JsonSerializer.Deserialize<QueryRequest>(payload, JsonOptions)
             ?? throw new ArgumentException("Invalid query request payload", nameof(payload));
 
-        _context!.Logger.LogInformation("Executing query with filters: {HasFilters}", request.Filters != null);
+        var queryId = request.QueryId ?? Guid.NewGuid().ToString("N");
+        _context!.Logger.LogInformation("Executing query {QueryId} with filters: {HasFilters}", queryId, request.Filters != null);
 
-        // Use QueryService with a new DbContext instance
+        // If event-based response is requested, run query in background and emit result
+        if (request.UseEventResponse)
+        {
+            // Return acknowledgment immediately
+            var ack = new QueryAcknowledgment
+            {
+                QueryId = queryId,
+                Started = true
+            };
+
+            // Start query in background (fire-and-forget with proper error handling)
+            _ = ExecuteQueryAndEmitResultAsync(request with { QueryId = queryId }, cancellationToken);
+
+            return JsonSerializer.SerializeToElement(ack, JsonOptions);
+        }
+
+        // Synchronous response (backward compatible)
         await using var dbContext = CreateDbContext(request.ConnectionId);
         var queryService = new QueryService(dbContext);
-        var response = await queryService.QueryAsync(request, cancellationToken);
+        var response = await queryService.QueryAsync(request with { QueryId = queryId }, cancellationToken);
 
         return JsonSerializer.SerializeToElement(response, JsonOptions);
+    }
+
+    private async Task ExecuteQueryAndEmitResultAsync(QueryRequest request, CancellationToken cancellationToken)
+    {
+        QueryResultEvent resultEvent;
+
+        try
+        {
+            await using var dbContext = CreateDbContext(request.ConnectionId);
+            var queryService = new QueryService(dbContext);
+            var response = await queryService.QueryAsync(request, cancellationToken);
+
+            resultEvent = new QueryResultEvent
+            {
+                QueryId = request.QueryId ?? string.Empty,
+                Success = true,
+                Rows = response.Rows,
+                Total = response.Total,
+                Stats = response.Stats
+            };
+
+            _context!.Logger.LogInformation(
+                "Query {QueryId} completed: {Total} results",
+                request.QueryId,
+                response.Total);
+        }
+        catch (Exception ex)
+        {
+            _context!.Logger.LogError(ex, "Query {QueryId} failed", request.QueryId);
+
+            resultEvent = new QueryResultEvent
+            {
+                QueryId = request.QueryId ?? string.Empty,
+                Success = false,
+                ErrorMessage = ex.Message
+            };
+        }
+
+        // Emit the result event
+        try
+        {
+            var pluginEvent = new PluginEvent
+            {
+                PluginId = PluginId,
+                Type = "plugin:sla:query-result",
+                Payload = JsonSerializer.Serialize(resultEvent, JsonOptions),
+                Timestamp = DateTimeOffset.UtcNow
+            };
+
+            _context!.EmitEvent(pluginEvent);
+            _context!.Logger.LogDebug("Emitted query result event for {QueryId}", request.QueryId);
+        }
+        catch (Exception ex)
+        {
+            _context!.Logger.LogError(ex, "Failed to emit query result event for {QueryId}", request.QueryId);
+        }
     }
 
     private async Task<JsonElement> ExecuteDetailsAsync(string payload, CancellationToken cancellationToken)
@@ -462,21 +537,43 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 
         var connectionId = request.ConnectionId ?? string.Empty;
 
-        // Get component data with attributes
         await using var dbContext = CreateDbContext(connectionId);
-        var component = await dbContext.Components
-            .Include(c => c.Layers)
-            .ThenInclude(l => l.Attributes)
-            .FirstOrDefaultAsync(c => c.ComponentId == request.ComponentId, cancellationToken);
 
-        if (component == null)
+        // Verify component exists (lightweight query without joins)
+        var componentExists = await dbContext.Components
+            .AnyAsync(c => c.ComponentId == request.ComponentId, cancellationToken);
+
+        if (!componentExists)
         {
             throw new InvalidOperationException($"Component not found: {request.ComponentId}");
         }
 
-        // Find left and right layers
-        var leftLayer = component.Layers.FirstOrDefault(l => l.SolutionName == request.Left.SolutionName);
-        var rightLayer = component.Layers.FirstOrDefault(l => l.SolutionName == request.Right.SolutionName);
+        // Query only the two specific layers by component ID and solution names
+        // This avoids loading all layers for the component
+        var solutionNames = new[] { request.Left.SolutionName, request.Right.SolutionName };
+        var layers = await dbContext.Layers
+            .Where(l => l.ComponentId == request.ComponentId && solutionNames.Contains(l.SolutionName))
+            .ToListAsync(cancellationToken);
+
+        // Find left and right layers from the filtered result
+        var leftLayer = layers.FirstOrDefault(l => l.SolutionName == request.Left.SolutionName);
+        var rightLayer = layers.FirstOrDefault(l => l.SolutionName == request.Right.SolutionName);
+
+        // Load attributes only for the filtered layers (avoid loading attributes for all layers)
+        if (leftLayer != null || rightLayer != null)
+        {
+            var layerIds = layers.Select(l => l.LayerId).ToList();
+            var attributes = await dbContext.Set<LayerAttribute>()
+                .Where(a => layerIds.Contains(a.LayerId))
+                .ToListAsync(cancellationToken);
+
+            // Associate attributes with their layers
+            var attributesByLayerId = attributes.ToLookup(a => a.LayerId);
+            foreach (var layer in layers)
+            {
+                layer.Attributes = attributesByLayerId[layer.LayerId].ToList();
+            }
+        }
 
         var warnings = new List<string>();
 
@@ -508,7 +605,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             else
             {
                 // Build diffs for changed attributes
-                foreach (var changedAttr in changedRightAttributes.Where(a => !ExcludedDiffAttributes.Contains(a.AttributeName)))
+                foreach (var changedAttr in changedRightAttributes.Where(a => !FilterConstants.ExcludedAttributeNames.Contains(a.AttributeName)))
                 {
                     var leftAttr = leftAttributes.FirstOrDefault(a =>
                         string.Equals(a.AttributeName, changedAttr.AttributeName, StringComparison.OrdinalIgnoreCase));
@@ -521,20 +618,17 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
                     var onlyInRight = leftAttr == null;
 
                     // Only include if there's actually a difference
-                    if (isDifferent || onlyInRight)
+                    attributeDiffs.Add(new AttributeDiff
                     {
-                        attributeDiffs.Add(new AttributeDiff
-                        {
-                            AttributeName = changedAttr.AttributeName,
-                            LeftValue = leftValue,
-                            RightValue = rightValue,
-                            AttributeType = (int)changedAttr.AttributeType,
-                            IsComplex = changedAttr.IsComplexValue || (leftAttr?.IsComplexValue ?? false),
-                            OnlyInLeft = onlyInLeft,
-                            OnlyInRight = onlyInRight,
-                            IsDifferent = isDifferent
-                        });
-                    }
+                        AttributeName = changedAttr.AttributeName,
+                        LeftValue = leftValue,
+                        RightValue = rightValue,
+                        AttributeType = (int)changedAttr.AttributeType,
+                        IsComplex = changedAttr.IsComplexValue || (leftAttr?.IsComplexValue ?? false),
+                        OnlyInLeft = onlyInLeft,
+                        OnlyInRight = onlyInRight,
+                        IsDifferent = isDifferent
+                    });
                 }
                 
                 // Also check for attributes that exist in left but not in right (removed attributes)
@@ -543,7 +637,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
                     StringComparer.OrdinalIgnoreCase);
                 
                 foreach (var leftAttr in leftAttributes.Where(a => 
-                    !ExcludedDiffAttributes.Contains(a.AttributeName) && 
+                    !FilterConstants.ExcludedAttributeNames.Contains(a.AttributeName) && 
                     !rightAttributeNames.Contains(a.AttributeName)))
                 {
                     attributeDiffs.Add(new AttributeDiff
@@ -569,29 +663,6 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 
         return JsonSerializer.SerializeToElement(response, JsonOptions);
     }
-
-    /// <summary>
-    /// Attributes to always exclude from diff comparison (system/metadata fields).
-    /// </summary>
-    private static readonly HashSet<string> ExcludedDiffAttributes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "sitemapnameunique",
-        "solutionid",
-        "sitemapxml",
-        "ismanaged",
-        "sitemapidunique",
-        "isappaware",
-        "createdon",
-        "componentstate",
-        "modifiedon",
-        "sitemapid",
-        "versionnumber",
-        "sitemapname",
-        "enablecollapsiblegroups",
-        "showhome",
-        "showrecents",
-        "showpinned",
-    };
 
     private async Task<JsonElement> ExecuteClearAsync(string payload, CancellationToken cancellationToken)
     {
@@ -766,6 +837,19 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         };
 
         return Task.FromResult(JsonSerializer.SerializeToElement(response, JsonOptions));
+    }
+
+    private async Task<JsonElement> ExecuteGetIndexMetadataAsync(string payload, CancellationToken cancellationToken)
+    {
+        var request = JsonSerializer.Deserialize<IndexMetadataRequest>(payload, JsonOptions)
+            ?? new IndexMetadataRequest();
+
+        _context!.Logger.LogInformation("Getting index metadata for connection: {ConnectionId}", request.ConnectionId);
+
+        var dbOptions = GetOrCreateDbOptions(request.ConnectionId);
+        var response = await IndexingService.GetIndexMetadataAsync(dbOptions, cancellationToken);
+
+        return JsonSerializer.SerializeToElement(response, JsonOptions);
     }
 
     private async Task<JsonElement> ExecuteGetAnalyticsAsync(string payload, CancellationToken cancellationToken)

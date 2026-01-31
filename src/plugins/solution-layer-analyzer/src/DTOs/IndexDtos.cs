@@ -108,3 +108,40 @@ public sealed record IndexStats
     /// </summary>
     public int Layers { get; init; }
 }
+
+/// <summary>
+/// Request for the getIndexMetadata command.
+/// </summary>
+public sealed record IndexMetadataRequest
+{
+    /// <summary>
+    /// Gets the connection ID.
+    /// </summary>
+    public string ConnectionId { get; init; } = string.Empty;
+}
+
+/// <summary>
+/// Response for the getIndexMetadata command.
+/// </summary>
+public sealed record IndexMetadataResponse
+{
+    /// <summary>
+    /// Gets a value indicating whether an index exists.
+    /// </summary>
+    public bool HasIndex { get; init; }
+
+    /// <summary>
+    /// Gets the source solution names used to build the index.
+    /// </summary>
+    public List<string> SourceSolutions { get; init; } = new();
+
+    /// <summary>
+    /// Gets the target solution names used to build the index.
+    /// </summary>
+    public List<string> TargetSolutions { get; init; } = new();
+
+    /// <summary>
+    /// Gets the statistics if an index exists.
+    /// </summary>
+    public IndexStats? Stats { get; init; }
+}
