@@ -5,7 +5,9 @@ using DataverseDevKit.Core.Abstractions;
 using DataverseDevKit.Core.Models;
 using Ddk.SolutionLayerAnalyzer.Data;
 using Ddk.SolutionLayerAnalyzer.DTOs;
+using Ddk.SolutionLayerAnalyzer.Models;
 using Ddk.SolutionLayerAnalyzer.Services;
+using Ddk.SolutionLayerAnalyzer.Filters;
 
 namespace Ddk.SolutionLayerAnalyzer;
 
@@ -16,18 +18,18 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 {
     private IPluginContext? _context;
     private bool _disposed;
-    
+
     /// <summary>
     /// Cache of DbContextOptions per connection ID.
     /// Each connection gets its own SQLite database file on disk.
     /// </summary>
     private readonly Dictionary<string, DbContextOptions<AnalyzerDbContext>> _dbOptionsCache = new();
-    
+
     /// <summary>
     /// Lock for thread-safe access to the options cache.
     /// </summary>
     private readonly object _cacheLock = new();
-    
+
     /// <summary>
     /// Semaphore to serialize database operations per connection.
     /// </summary>
@@ -79,7 +81,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             // Create database file path unique to this connection
             var dbDirectory = GetDatabaseDirectory();
             Directory.CreateDirectory(dbDirectory);
-            
+
             // Sanitize connection ID for use in filename
             var safeConnectionId = string.Join("_", connectionId.Split(Path.GetInvalidFileNameChars()));
             var dbPath = Path.Combine(dbDirectory, $"analyzer_{safeConnectionId}.db");
@@ -235,7 +237,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         _context = context;
         _context.Logger.LogInformation("Solution Layer Analyzer plugin initialized");
         _context.Logger.LogInformation("Database directory: {DbDirectory}", GetDatabaseDirectory());
-        
+
         return Task.CompletedTask;
     }
 
@@ -349,6 +351,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             "fetchSolutions" => await ExecuteFetchSolutionsAsync(payload, cancellationToken),
             "getComponentTypes" => await ExecuteGetComponentTypesAsync(cancellationToken),
             "getAnalytics" => await ExecuteGetAnalyticsAsync(payload, cancellationToken),
+            "getIndexMetadata" => await ExecuteGetIndexMetadataAsync(payload, cancellationToken),
             "saveIndexConfig" => await ExecuteSaveIndexConfigAsync(payload, cancellationToken),
             "loadIndexConfigs" => await ExecuteLoadIndexConfigsAsync(payload, cancellationToken),
             "saveFilterConfig" => await ExecuteSaveFilterConfigAsync(payload, cancellationToken),
@@ -399,24 +402,86 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         var request = JsonSerializer.Deserialize<QueryRequest>(payload, JsonOptions)
             ?? throw new ArgumentException("Invalid query request payload", nameof(payload));
 
-        _context!.Logger.LogInformation("Executing query with filters: {HasFilters}", request.Filters != null);
+        var queryId = request.QueryId ?? Guid.NewGuid().ToString("N");
+        _context!.Logger.LogInformation("Executing query {QueryId} with filters: {HasFilters}", queryId, request.Filters != null);
 
-        var dbLock = GetDbLock(request.ConnectionId);
+        // If event-based response is requested, run query in background and emit result
+        if (request.UseEventResponse)
+        {
+            // Return acknowledgment immediately
+            var ack = new QueryAcknowledgment
+            {
+                QueryId = queryId,
+                Started = true
+            };
 
-        // Serialize database access to avoid SQLite concurrency issues
-        await dbLock.WaitAsync(cancellationToken);
+            // Start query in background (fire-and-forget with proper error handling)
+            _ = ExecuteQueryAndEmitResultAsync(request with { QueryId = queryId }, cancellationToken);
+
+            return JsonSerializer.SerializeToElement(ack, JsonOptions);
+        }
+
+        // Synchronous response (backward compatible)
+        await using var dbContext = CreateDbContext(request.ConnectionId);
+        var queryService = new QueryService(dbContext);
+        var response = await queryService.QueryAsync(request with { QueryId = queryId }, cancellationToken);
+
+        return JsonSerializer.SerializeToElement(response, JsonOptions);
+    }
+
+    private async Task ExecuteQueryAndEmitResultAsync(QueryRequest request, CancellationToken cancellationToken)
+    {
+        QueryResultEvent resultEvent;
+
         try
         {
-            // Use QueryService with a new DbContext instance
             await using var dbContext = CreateDbContext(request.ConnectionId);
             var queryService = new QueryService(dbContext);
             var response = await queryService.QueryAsync(request, cancellationToken);
 
-            return JsonSerializer.SerializeToElement(response, JsonOptions);
+            resultEvent = new QueryResultEvent
+            {
+                QueryId = request.QueryId ?? string.Empty,
+                Success = true,
+                Rows = response.Rows,
+                Total = response.Total,
+                Stats = response.Stats
+            };
+
+            _context!.Logger.LogInformation(
+                "Query {QueryId} completed: {Total} results",
+                request.QueryId,
+                response.Total);
         }
-        finally
+        catch (Exception ex)
         {
-            dbLock.Release();
+            _context!.Logger.LogError(ex, "Query {QueryId} failed", request.QueryId);
+
+            resultEvent = new QueryResultEvent
+            {
+                QueryId = request.QueryId ?? string.Empty,
+                Success = false,
+                ErrorMessage = ex.Message
+            };
+        }
+
+        // Emit the result event
+        try
+        {
+            var pluginEvent = new PluginEvent
+            {
+                PluginId = PluginId,
+                Type = "plugin:sla:query-result",
+                Payload = JsonSerializer.Serialize(resultEvent, JsonOptions),
+                Timestamp = DateTimeOffset.UtcNow
+            };
+
+            _context!.EmitEvent(pluginEvent);
+            _context!.Logger.LogDebug("Emitted query result event for {QueryId}", request.QueryId);
+        }
+        catch (Exception ex)
+        {
+            _context!.Logger.LogError(ex, "Failed to emit query result event for {QueryId}", request.QueryId);
         }
     }
 
@@ -427,46 +492,36 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 
         _context!.Logger.LogInformation("Getting details for component: {ComponentId}", request.ComponentId);
 
-        var dbLock = GetDbLock(request.ConnectionId);
 
-        // Serialize database access to avoid SQLite concurrency issues
-        await dbLock.WaitAsync(cancellationToken);
-        try
+        await using var dbContext = CreateDbContext(request.ConnectionId);
+        var component = await dbContext.Components
+            .Include(c => c.Layers)
+            .FirstOrDefaultAsync(c => c.ComponentId == request.ComponentId, cancellationToken);
+
+        if (component == null)
         {
-            await using var dbContext = CreateDbContext(request.ConnectionId);
-            var component = await dbContext.Components
-                .Include(c => c.Layers)
-                .FirstOrDefaultAsync(c => c.ComponentId == request.ComponentId, cancellationToken);
-
-            if (component == null)
-            {
-                throw new InvalidOperationException($"Component not found: {request.ComponentId}");
-            }
-
-            var response = new DetailsResponse
-            {
-                Layers = component.Layers
-                    .OrderBy(l => l.Ordinal)
-                    .Select(l => new LayerDetail
-                    {
-                        SolutionName = l.SolutionName,
-                        Publisher = l.Publisher,
-                        IsManaged = l.IsManaged,
-                        Version = l.Version,
-                        CreatedOn = l.CreatedOn,
-                        Ordinal = l.Ordinal,
-                        ComponentJson = ParseComponentJson(l.ComponentJson),
-                        Changes = null // msdyn_changes would need to be retrieved separately if needed
-                    })
-                    .ToList()
-            };
-
-            return JsonSerializer.SerializeToElement(response, JsonOptions);
+            throw new InvalidOperationException($"Component not found: {request.ComponentId}");
         }
-        finally
+
+        var response = new DetailsResponse
         {
-            dbLock.Release();
-        }
+            Layers = component.Layers
+                .OrderBy(l => l.Ordinal)
+                .Select(l => new LayerDetail
+                {
+                    SolutionName = l.SolutionName,
+                    Publisher = l.Publisher,
+                    IsManaged = l.IsManaged,
+                    Version = l.Version,
+                    CreatedOn = l.CreatedOn,
+                    Ordinal = l.Ordinal,
+                    ComponentJson = ParseComponentJson(l.ComponentJson),
+                    Changes = null // msdyn_changes would need to be retrieved separately if needed
+                })
+                .ToList()
+        };
+
+        return JsonSerializer.SerializeToElement(response, JsonOptions);
     }
 
     private async Task<JsonElement> ExecuteDiffAsync(string payload, CancellationToken cancellationToken)
@@ -481,74 +536,128 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             request.Right.SolutionName);
 
         var connectionId = request.ConnectionId ?? string.Empty;
-        var dbLock = GetDbLock(connectionId);
 
-        // Get component data within lock, then release for network calls
-        Models.Component component;
-        await dbLock.WaitAsync(cancellationToken);
-        try
+        await using var dbContext = CreateDbContext(connectionId);
+
+        // Verify component exists (lightweight query without joins)
+        var componentExists = await dbContext.Components
+            .AnyAsync(c => c.ComponentId == request.ComponentId, cancellationToken);
+
+        if (!componentExists)
         {
-            await using var dbContext = CreateDbContext(connectionId);
-            var found = await dbContext.Components
-                .Include(c => c.Layers)
-                .FirstOrDefaultAsync(c => c.ComponentId == request.ComponentId, cancellationToken);
+            throw new InvalidOperationException($"Component not found: {request.ComponentId}");
+        }
 
-            if (found == null)
+        // Query only the two specific layers by component ID and solution names
+        // This avoids loading all layers for the component
+        var solutionNames = new[] { request.Left.SolutionName, request.Right.SolutionName };
+        var layers = await dbContext.Layers
+            .Where(l => l.ComponentId == request.ComponentId && solutionNames.Contains(l.SolutionName))
+            .ToListAsync(cancellationToken);
+
+        // Find left and right layers from the filtered result
+        var leftLayer = layers.FirstOrDefault(l => l.SolutionName == request.Left.SolutionName);
+        var rightLayer = layers.FirstOrDefault(l => l.SolutionName == request.Right.SolutionName);
+
+        // Load attributes only for the filtered layers (avoid loading attributes for all layers)
+        if (leftLayer != null || rightLayer != null)
+        {
+            var layerIds = layers.Select(l => l.LayerId).ToList();
+            var attributes = await dbContext.Set<LayerAttribute>()
+                .Where(a => layerIds.Contains(a.LayerId))
+                .ToListAsync(cancellationToken);
+
+            // Associate attributes with their layers
+            var attributesByLayerId = attributes.ToLookup(a => a.LayerId);
+            foreach (var layer in layers)
             {
-                throw new InvalidOperationException($"Component not found: {request.ComponentId}");
+                layer.Attributes = attributesByLayerId[layer.LayerId].ToList();
             }
-            component = found;
-        }
-        finally
-        {
-            dbLock.Release();
-        }
-
-        // Get ServiceClient for payload retrieval (outside lock for long-running network calls)
-        var serviceClient = _context.ServiceClientFactory.GetServiceClient(request.ConnectionId);
-        var payloadService = new PayloadService(serviceClient, _context.Logger);
-
-        // Find left and right layers
-        var leftLayer = component.Layers.FirstOrDefault(l => l.SolutionName == request.Left.SolutionName);
-        var rightLayer = component.Layers.FirstOrDefault(l => l.SolutionName == request.Right.SolutionName);
-
-        // Retrieve payloads from componentjson (works for ALL component types)
-        string? leftText = null;
-        string? rightText = null;
-        string? leftMime = "application/json";
-        string? rightMime = "application/json";
-
-        if (leftLayer?.ComponentJson != null)
-        {
-            var (leftPayload, leftPayloadMime) = payloadService.RetrievePayloadFromComponentJson(leftLayer.ComponentJson);
-            leftText = leftPayload;
-            leftMime = leftPayloadMime;
-        }
-
-        if (rightLayer?.ComponentJson != null)
-        {
-            var (rightPayload, rightPayloadMime) = payloadService.RetrievePayloadFromComponentJson(rightLayer.ComponentJson);
-            rightText = rightPayload;
-            rightMime = rightPayloadMime;
         }
 
         var warnings = new List<string>();
-        if (leftText == null)
+
+        if (leftLayer == null)
         {
-            warnings.Add($"Could not retrieve payload for left solution: {request.Left.SolutionName}");
-            leftText = "// Payload not available";
+            warnings.Add($"Left solution layer not found: {request.Left.SolutionName}");
         }
-        if (rightText == null)
+
+        if (rightLayer == null)
         {
-            warnings.Add($"Could not retrieve payload for right solution: {request.Right.SolutionName}");
-            rightText = "// Payload not available";
+            warnings.Add($"Right solution layer not found: {request.Right.SolutionName}");
+        }
+
+        // Build attribute diffs
+        var attributeDiffs = new List<AttributeDiff>();
+
+        if (leftLayer != null && rightLayer != null)
+        {
+            var leftAttributes = leftLayer.Attributes.ToList();
+            var rightAttributes = rightLayer.Attributes.ToList();
+
+            // Get all changed attributes from right layer
+            var changedRightAttributes = rightAttributes.Where(a => a.IsChanged).ToList();
+
+            if (changedRightAttributes.Count == 0)
+            {
+                warnings.Add("No changed attributes detected in right layer. This may indicate the layer has no changes tracked.");
+            }
+            else
+            {
+                // Build diffs for changed attributes
+                foreach (var changedAttr in changedRightAttributes.Where(a => !FilterConstants.ExcludedAttributeNames.Contains(a.AttributeName)))
+                {
+                    var leftAttr = leftAttributes.FirstOrDefault(a =>
+                        string.Equals(a.AttributeName, changedAttr.AttributeName, StringComparison.OrdinalIgnoreCase));
+
+                    var leftValue = leftAttr?.AttributeValue;
+                    var rightValue = changedAttr.AttributeValue;
+
+                    var isDifferent = leftValue != rightValue;
+                    var onlyInLeft = false; // changedAttr comes from right, so it can't be only in left
+                    var onlyInRight = leftAttr == null;
+
+                    // Only include if there's actually a difference
+                    attributeDiffs.Add(new AttributeDiff
+                    {
+                        AttributeName = changedAttr.AttributeName,
+                        LeftValue = leftValue,
+                        RightValue = rightValue,
+                        AttributeType = (int)changedAttr.AttributeType,
+                        IsComplex = changedAttr.IsComplexValue || (leftAttr?.IsComplexValue ?? false),
+                        OnlyInLeft = onlyInLeft,
+                        OnlyInRight = onlyInRight,
+                        IsDifferent = isDifferent
+                    });
+                }
+                
+                // Also check for attributes that exist in left but not in right (removed attributes)
+                var rightAttributeNames = new HashSet<string>(
+                    rightAttributes.Select(a => a.AttributeName), 
+                    StringComparer.OrdinalIgnoreCase);
+                
+                foreach (var leftAttr in leftAttributes.Where(a => 
+                    !FilterConstants.ExcludedAttributeNames.Contains(a.AttributeName) && 
+                    !rightAttributeNames.Contains(a.AttributeName)))
+                {
+                    attributeDiffs.Add(new AttributeDiff
+                    {
+                        AttributeName = leftAttr.AttributeName,
+                        LeftValue = leftAttr.AttributeValue,
+                        RightValue = null,
+                        AttributeType = (int)leftAttr.AttributeType,
+                        IsComplex = leftAttr.IsComplexValue,
+                        OnlyInLeft = true,
+                        OnlyInRight = false,
+                        IsDifferent = false
+                    });
+                }
+            }
         }
 
         var response = new DiffResponse
         {
-            LeftText = leftText ?? string.Empty,
-            RightText = rightText ?? string.Empty,
-            Mime = leftMime ?? rightMime ?? "application/json",
+            Attributes = attributeDiffs,
             Warnings = warnings
         };
 
@@ -559,8 +668,8 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
     {
         // Parse connection ID from payload
         var request = JsonSerializer.Deserialize<JsonElement>(payload);
-        var connectionId = request.TryGetProperty("connectionId", out var connIdProp) 
-            ? connIdProp.GetString() ?? string.Empty 
+        var connectionId = request.TryGetProperty("connectionId", out var connIdProp)
+            ? connIdProp.GetString() ?? string.Empty
             : string.Empty;
 
         _context!.Logger.LogInformation("Clearing index for connection: {ConnectionId}", connectionId);
@@ -596,21 +705,11 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
 
         _context!.Logger.LogInformation("Saving index config: {Name}", request.Name);
 
-        var dbLock = GetDbLock(request.ConnectionId);
+        await using var dbContext = CreateDbContext(request.ConnectionId);
+        var configService = new ConfigService(dbContext, _context.Logger);
+        var response = await configService.SaveIndexConfigAsync(request, cancellationToken);
 
-        await dbLock.WaitAsync(cancellationToken);
-        try
-        {
-            await using var dbContext = CreateDbContext(request.ConnectionId);
-            var configService = new ConfigService(dbContext, _context.Logger);
-            var response = await configService.SaveIndexConfigAsync(request, cancellationToken);
-
-            return JsonSerializer.SerializeToElement(response, JsonOptions);
-        }
-        finally
-        {
-            dbLock.Release();
-        }
+        return JsonSerializer.SerializeToElement(response, JsonOptions);
     }
 
     private async Task<JsonElement> ExecuteLoadIndexConfigsAsync(string payload, CancellationToken cancellationToken)
@@ -621,21 +720,11 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         _context!.Logger.LogInformation("Loading index configs");
 
         var connectionId = request.ConnectionId ?? string.Empty;
-        var dbLock = GetDbLock(connectionId);
+        await using var dbContext = CreateDbContext(connectionId);
+        var configService = new ConfigService(dbContext, _context.Logger);
+        var response = await configService.LoadIndexConfigsAsync(request, cancellationToken);
 
-        await dbLock.WaitAsync(cancellationToken);
-        try
-        {
-            await using var dbContext = CreateDbContext(connectionId);
-            var configService = new ConfigService(dbContext, _context.Logger);
-            var response = await configService.LoadIndexConfigsAsync(request, cancellationToken);
-
-            return JsonSerializer.SerializeToElement(response, JsonOptions);
-        }
-        finally
-        {
-            dbLock.Release();
-        }
+        return JsonSerializer.SerializeToElement(response, JsonOptions);
     }
 
     private async Task<JsonElement> ExecuteSaveFilterConfigAsync(string payload, CancellationToken cancellationToken)
@@ -646,21 +735,11 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         _context!.Logger.LogInformation("Saving filter config: {Name}", request.Name);
 
         var connectionId = request.ConnectionId ?? string.Empty;
-        var dbLock = GetDbLock(connectionId);
+        await using var dbContext = CreateDbContext(connectionId);
+        var configService = new ConfigService(dbContext, _context.Logger);
+        var response = await configService.SaveFilterConfigAsync(request, cancellationToken);
 
-        await dbLock.WaitAsync(cancellationToken);
-        try
-        {
-            await using var dbContext = CreateDbContext(connectionId);
-            var configService = new ConfigService(dbContext, _context.Logger);
-            var response = await configService.SaveFilterConfigAsync(request, cancellationToken);
-
-            return JsonSerializer.SerializeToElement(response, JsonOptions);
-        }
-        finally
-        {
-            dbLock.Release();
-        }
+        return JsonSerializer.SerializeToElement(response, JsonOptions);
     }
 
     private async Task<JsonElement> ExecuteLoadFilterConfigsAsync(string payload, CancellationToken cancellationToken)
@@ -671,21 +750,11 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         _context!.Logger.LogInformation("Loading filter configs");
 
         var connectionId = request.ConnectionId ?? string.Empty;
-        var dbLock = GetDbLock(connectionId);
+        await using var dbContext = CreateDbContext(connectionId);
+        var configService = new ConfigService(dbContext, _context.Logger);
+        var response = await configService.LoadFilterConfigsAsync(request, cancellationToken);
 
-        await dbLock.WaitAsync(cancellationToken);
-        try
-        {
-            await using var dbContext = CreateDbContext(connectionId);
-            var configService = new ConfigService(dbContext, _context.Logger);
-            var response = await configService.LoadFilterConfigsAsync(request, cancellationToken);
-
-            return JsonSerializer.SerializeToElement(response, JsonOptions);
-        }
-        finally
-        {
-            dbLock.Release();
-        }
+        return JsonSerializer.SerializeToElement(response, JsonOptions);
     }
 
     private async Task<JsonElement> ExecuteFetchSolutionsAsync(string payload, CancellationToken cancellationToken)
@@ -718,8 +787,8 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
                 DisplayName = entity.GetAttributeValue<string>("friendlyname") ?? string.Empty,
                 Version = entity.GetAttributeValue<string>("version") ?? "1.0.0.0",
                 IsManaged = entity.GetAttributeValue<bool>("ismanaged"),
-                Publisher = entity.Contains("publisherid") 
-                    ? ((Microsoft.Xrm.Sdk.EntityReference)entity["publisherid"]).Name 
+                Publisher = entity.Contains("publisherid")
+                    ? ((Microsoft.Xrm.Sdk.EntityReference)entity["publisherid"]).Name
                     : null
             });
         }
@@ -770,6 +839,19 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         return Task.FromResult(JsonSerializer.SerializeToElement(response, JsonOptions));
     }
 
+    private async Task<JsonElement> ExecuteGetIndexMetadataAsync(string payload, CancellationToken cancellationToken)
+    {
+        var request = JsonSerializer.Deserialize<IndexMetadataRequest>(payload, JsonOptions)
+            ?? new IndexMetadataRequest();
+
+        _context!.Logger.LogInformation("Getting index metadata for connection: {ConnectionId}", request.ConnectionId);
+
+        var dbOptions = GetOrCreateDbOptions(request.ConnectionId);
+        var response = await IndexingService.GetIndexMetadataAsync(dbOptions, cancellationToken);
+
+        return JsonSerializer.SerializeToElement(response, JsonOptions);
+    }
+
     private async Task<JsonElement> ExecuteGetAnalyticsAsync(string payload, CancellationToken cancellationToken)
     {
         var request = JsonSerializer.Deserialize<GetAnalyticsRequest>(payload, JsonOptions)
@@ -778,29 +860,18 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         _context!.Logger.LogInformation("Computing analytics");
 
         var connectionId = request.ConnectionId ?? string.Empty;
-        var dbLock = GetDbLock(connectionId);
+        using var dbContext = CreateDbContext(connectionId);
 
-        // Serialize database access
-        await dbLock.WaitAsync(cancellationToken);
-        try
-        {
-            using var dbContext = CreateDbContext(connectionId);
-            
-            var analyticsService = new AnalyticsService(_context.Logger);
-            var analytics = await analyticsService.ComputeAnalyticsAsync(dbContext, cancellationToken);
-            
-            _context.Logger.LogInformation(
-                "Analytics computed: {Solutions} solutions, {Components} components with risks, {Violations} violations detected",
-                analytics.SolutionMetrics.Count,
-                analytics.ComponentRisks.Count,
-                analytics.Violations.Count);
-            
-            return JsonSerializer.SerializeToElement(analytics, JsonOptions);
-        }
-        finally
-        {
-            dbLock.Release();
-        }
+        var analyticsService = new AnalyticsService(_context.Logger);
+        var analytics = await analyticsService.ComputeAnalyticsAsync(dbContext, cancellationToken);
+
+        _context.Logger.LogInformation(
+            "Analytics computed: {Solutions} solutions, {Components} components with risks, {Violations} violations detected",
+            analytics.SolutionMetrics.Count,
+            analytics.ComponentRisks.Count,
+            analytics.Violations.Count);
+
+        return JsonSerializer.SerializeToElement(analytics, JsonOptions);
     }
 
     /// <inheritdoc/>

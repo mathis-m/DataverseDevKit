@@ -436,7 +436,7 @@ public class IndexingService
                 // Query msdyn_componentlayer for this component
                 var query = new QueryExpression("msdyn_componentlayer")
                 {
-                    ColumnSet = new ColumnSet("msdyn_componentlayerid", "msdyn_solutionname", "msdyn_order", "msdyn_publishername", "msdyn_componentjson"),
+                    ColumnSet = new ColumnSet("msdyn_componentlayerid", "msdyn_solutionname", "msdyn_order", "msdyn_publishername", "msdyn_componentjson", "msdyn_changes"),
                     Criteria = new FilterExpression(LogicalOperator.And)
                     {
                         Conditions =
@@ -470,6 +470,7 @@ public class IndexingService
                             var ordinal = entity.GetAttributeValue<int>("msdyn_order");
                             var solutionName = entity.GetAttributeValue<string>("msdyn_solutionname") ?? "Unknown";
                             var componentJson = entity.GetAttributeValue<string>("msdyn_componentjson");
+                            var changes = entity.GetAttributeValue<string>("msdyn_changes");
                             
                             var layer = new Layer
                             {
@@ -482,7 +483,8 @@ public class IndexingService
                                 IsManaged = true,
                                 Version = "1.0.0.0",
                                 CreatedOn = DateTimeOffset.UtcNow,
-                                ComponentJson = componentJson
+                                ComponentJson = componentJson,
+                                Changes = changes
                             };
 
                             // Look up solution from cache
@@ -497,7 +499,7 @@ public class IndexingService
                             // Extract and format layer attributes
                             try
                             {
-                                var extractedAttributes = _attributeExtractor.ExtractAttributes(layer.LayerId, componentJson);
+                                var extractedAttributes = _attributeExtractor.ExtractAttributes(layer.LayerId, componentJson, changes);
                                 layer.Attributes = extractedAttributes;
                                 
                                 _logger.LogDebug("Extracted {Count} attributes for layer {LayerId}", 
@@ -596,6 +598,48 @@ public class IndexingService
             "Form" => "SystemForm",
             "View" => "SavedQuery",
             _ => componentType
+        };
+    }
+
+    /// <summary>
+    /// Gets metadata about the current index including source and target solutions.
+    /// </summary>
+    public static async Task<IndexMetadataResponse> GetIndexMetadataAsync(
+        DbContextOptions<AnalyzerDbContext> dbContextOptions,
+        CancellationToken cancellationToken)
+    {
+        await using var dbContext = new AnalyzerDbContext(dbContextOptions);
+
+        var solutionCount = await dbContext.Solutions.CountAsync(cancellationToken);
+        if (solutionCount == 0)
+        {
+            return new IndexMetadataResponse { HasIndex = false };
+        }
+
+        var sourceSolutions = await dbContext.Solutions
+            .Where(s => s.IsSource)
+            .Select(s => s.UniqueName)
+            .ToListAsync(cancellationToken);
+
+        var targetSolutions = await dbContext.Solutions
+            .Where(s => s.IsTarget)
+            .Select(s => s.UniqueName)
+            .ToListAsync(cancellationToken);
+
+        var componentCount = await dbContext.Components.CountAsync(cancellationToken);
+        var layerCount = await dbContext.Layers.CountAsync(cancellationToken);
+
+        return new IndexMetadataResponse
+        {
+            HasIndex = true,
+            SourceSolutions = sourceSolutions,
+            TargetSolutions = targetSolutions,
+            Stats = new IndexStats
+            {
+                Solutions = solutionCount,
+                Components = componentCount,
+                Layers = layerCount
+            }
         };
     }
 }

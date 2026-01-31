@@ -116,6 +116,11 @@ public sealed class AnalyzerDbContext : DbContext
             entity.HasKey(e => e.LayerId);
             entity.HasIndex(e => new { e.ComponentId, e.Ordinal });
             entity.HasIndex(e => e.SolutionId);
+            // New indexes for SQL filter optimization
+            entity.HasIndex(e => e.SolutionName);
+            entity.HasIndex(e => new { e.SolutionName, e.ComponentId, e.Ordinal });
+            entity.HasIndex(e => e.Publisher);
+            entity.HasIndex(e => e.IsManaged);
             entity.HasMany(e => e.Attributes)
                   .WithOne(e => e.Layer)
                   .HasForeignKey(e => e.LayerId)
@@ -130,6 +135,13 @@ public sealed class AnalyzerDbContext : DbContext
             entity.HasIndex(e => e.AttributeName);
             entity.HasIndex(e => new { e.LayerId, e.AttributeName });
             entity.HasIndex(e => e.AttributeType);
+            entity.HasIndex(e => new { e.LayerId, e.IsChanged });
+            // New indexes for SQL filter optimization
+            entity.HasIndex(e => new { e.AttributeName, e.IsChanged });
+            entity.HasIndex(e => e.IsChanged);
+            // Indexes for HAS_ATTRIBUTE_DIFF filter - efficient cross-layer comparison
+            entity.HasIndex(e => e.AttributeHash);
+            entity.HasIndex(e => new { e.LayerId, e.AttributeName, e.AttributeHash });
         });
 
         // Configure Artifact entity

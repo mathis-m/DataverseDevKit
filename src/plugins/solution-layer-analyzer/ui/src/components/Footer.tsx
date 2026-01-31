@@ -3,10 +3,6 @@ import { makeStyles, shorthands, tokens } from '@fluentui/react-components';
 
 const useStyles = makeStyles({
   footer: {
-    position: 'fixed',
-    bottom: 0,
-    right: 0,
-    left: 0,
     height: '40px',
     backgroundColor: tokens.colorNeutralBackground2,
     ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke1),
@@ -14,7 +10,6 @@ const useStyles = makeStyles({
     alignItems: 'center',
     justifyContent: 'space-between',
     ...shorthands.padding('0', '16px'),
-    zIndex: 1000,
     boxShadow: tokens.shadow8,
   },
   leftSection: {

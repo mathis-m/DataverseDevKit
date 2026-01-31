@@ -52,12 +52,11 @@ public sealed class PluginHostGrpcService : PluginHostService.PluginHostServiceB
             }
             else
             {
-                var errorMsg = "Cannot initialize plugin: No active Dataverse connection. Please connect to an environment first.";
-                _logger.LogError(errorMsg);
+                _logger.LogError("Cannot initialize plugin: No active Dataverse connection. Please connect to an environment first.");
                 return new InitializeResponse
                 {
                     Success = false,
-                    ErrorMessage = errorMsg
+                    ErrorMessage = "Cannot initialize plugin: No active Dataverse connection. Please connect to an environment first."
                 };
             }
 

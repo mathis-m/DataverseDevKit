@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { IndexStats, FilterNode, ComponentResult } from '../types';
+import { IndexStats, FilterNode, ComponentResult, AttributeDiff, QueryPlanStats } from '../types';
 
 export interface Solution {
   uniqueName: string;
@@ -24,6 +24,18 @@ export interface IndexConfig {
   payloadMode: 'lazy' | 'eager';
 }
 
+// Index metadata from existing index (source/target solutions used to build it)
+export interface StoredIndexMetadata {
+  hasIndex: boolean;
+  sourceSolutions: string[];
+  targetSolutions: string[];
+  stats?: {
+    solutions: number;
+    components: number;
+    layers: number;
+  };
+}
+
 export interface FilterConfig {
   filters: FilterNode | null;
 }
@@ -42,6 +54,7 @@ export interface DiffState {
   rightSolution?: string;
   leftPayload?: any;
   rightPayload?: any;
+  attributeDiffs?: AttributeDiff[];
   warnings?: string[];
   searchTerm?: string;
 }
@@ -72,6 +85,20 @@ export interface AnalysisState {
   groupBy: 'componentType' | 'table' | 'publisher' | 'solution' | 'managed';
 }
 
+/**
+ * Query state for tracking event-based queries.
+ */
+export interface QueryState {
+  /** The latest query ID that was sent */
+  latestQueryId: string | null;
+  /** Whether a query is currently in progress */
+  isQuerying: boolean;
+  /** The last query stats for diagnostics */
+  lastQueryStats: QueryPlanStats | null;
+  /** Error message from the last query (if any) */
+  lastError: string | null;
+}
+
 interface AppState {
   // Global metadata (loaded once)
   availableSolutions: Solution[];
@@ -81,6 +108,7 @@ interface AppState {
   // Index state
   indexConfig: IndexConfig;
   indexStats: IndexStats | null;
+  indexMetadata: StoredIndexMetadata | null;
   
   // UI state
   selectedTab: string;
@@ -90,6 +118,9 @@ interface AppState {
   
   // Filter bar state
   filterBarState: FilterBarState;
+  
+  // Query state (for event-based queries)
+  queryState: QueryState;
   
   // Legacy (keeping for backward compatibility)
   components: ComponentResult[];
@@ -108,6 +139,7 @@ interface AppState {
   setMetadataLoaded: (loaded: boolean) => void;
   setIndexConfig: (config: Partial<IndexConfig>) => void;
   setIndexStats: (stats: IndexStats | null) => void;
+  setIndexMetadata: (metadata: StoredIndexMetadata | null) => void;
   
   // UI actions
   setSelectedTab: (tab: string) => void;
@@ -117,6 +149,9 @@ interface AppState {
   
   // Filter bar actions
   setFilterBarState: (state: Partial<FilterBarState>) => void;
+  
+  // Query state actions
+  setQueryState: (state: Partial<QueryState>) => void;
   
   // Legacy actions (keeping for backward compatibility)
   setComponents: (components: ComponentResult[]) => void;
@@ -146,6 +181,7 @@ const initialState = {
     payloadMode: 'lazy' as const,
   },
   indexStats: null,
+  indexMetadata: null as StoredIndexMetadata | null,
   selectedTab: 'index',
   analysisState: {
     allComponents: [],
@@ -159,6 +195,12 @@ const initialState = {
     advancedMode: false,
     advancedFilter: null,
   },
+  queryState: {
+    latestQueryId: null,
+    isQuerying: false,
+    lastQueryStats: null,
+    lastError: null,
+  } as QueryState,
   components: [],
   filterConfig: { filters: null },
   selectedComponentId: null,
@@ -184,6 +226,8 @@ export const useAppStore = create<AppState>()(
       
       setIndexStats: (stats) => set({ indexStats: stats }),
       
+      setIndexMetadata: (metadata) => set({ indexMetadata: metadata }),
+      
       setSelectedTab: (tab) => set({ selectedTab: tab }),
       
       setAnalysisState: (analysisState) =>
@@ -194,6 +238,11 @@ export const useAppStore = create<AppState>()(
       setFilterBarState: (filterBarState) =>
         set((state) => ({
           filterBarState: { ...state.filterBarState, ...filterBarState },
+        })),
+      
+      setQueryState: (queryState) =>
+        set((state) => ({
+          queryState: { ...state.queryState, ...queryState },
         })),
       
       setComponents: (components) => set({ components }),

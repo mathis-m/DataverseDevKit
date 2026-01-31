@@ -15,6 +15,10 @@ namespace Ddk.SolutionLayerAnalyzer.Filters;
 [JsonDerivedType(typeof(LayerQueryFilterNode), "LAYER_QUERY")]
 [JsonDerivedType(typeof(SolutionQueryFilterNode), "SOLUTION_QUERY")]
 [JsonDerivedType(typeof(LayerAttributeFilterNode), "LAYER_ATTRIBUTE")]
+[JsonDerivedType(typeof(LayerAttributeQueryFilterNode), "LAYER_ATTRIBUTE_QUERY")]
+// Layer attribute predicates (used inside LAYER_ATTRIBUTE_QUERY)
+[JsonDerivedType(typeof(HasRelevantChangesFilterNode), "HAS_RELEVANT_CHANGES")]
+[JsonDerivedType(typeof(HasAttributeDiffFilterNode), "HAS_ATTRIBUTE_DIFF")]
 // Logical operators
 [JsonDerivedType(typeof(AndFilterNode), "AND")]
 [JsonDerivedType(typeof(OrFilterNode), "OR")]
@@ -314,6 +318,112 @@ public sealed class LayerAttributeFilterNode : FilterNode
     [JsonPropertyName("attributeType")]
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public Models.LayerAttributeType? AttributeType { get; set; }
+}
+
+/// <summary>
+/// Filter that scopes layer attribute queries to a specific solution layer.
+/// Used within LAYER_QUERY to filter by attributes of a specific solution's layer.
+/// </summary>
+public sealed class LayerAttributeQueryFilterNode : FilterNode
+{
+    /// <summary>
+    /// Gets or sets the target solution name to query attributes from.
+    /// </summary>
+    [JsonPropertyName("solution")]
+    public string Solution { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the nested filter to apply to the layer's attributes.
+    /// Can be AND, OR, NOT, or leaf predicates like HAS_RELEVANT_CHANGES.
+    /// </summary>
+    [JsonPropertyName("attributeFilter")]
+    public FilterNode? AttributeFilter { get; set; }
+}
+
+/// <summary>
+/// Predicate that checks if a layer has relevant (non-system) changes.
+/// Evaluates to true if the layer has any changed attributes that are not in the excluded list.
+/// </summary>
+public sealed class HasRelevantChangesFilterNode : FilterNode
+{
+}
+
+/// <summary>
+/// Specifies how target solutions are determined for attribute diff comparison.
+/// </summary>
+public enum AttributeDiffTargetMode
+{
+    /// <summary>
+    /// Compare against explicitly specified target solutions.
+    /// </summary>
+    Specific,
+
+    /// <summary>
+    /// Compare against all solution layers with lower ordinal (below the source layer).
+    /// </summary>
+    AllBelow
+}
+
+/// <summary>
+/// Specifies how multiple attribute names are matched when checking for differences.
+/// </summary>
+public enum AttributeMatchLogic
+{
+    /// <summary>
+    /// Diff is detected if ANY of the specified attributes differ.
+    /// </summary>
+    Any,
+
+    /// <summary>
+    /// Diff is detected only if ALL of the specified attributes differ.
+    /// </summary>
+    All
+}
+
+/// <summary>
+/// Predicate that checks if attributes differ between a source solution layer and target solution layers.
+/// Used to detect actual changes introduced by a solution layer.
+/// </summary>
+public sealed class HasAttributeDiffFilterNode : FilterNode
+{
+    /// <summary>
+    /// Gets or sets the source solution name to compare from.
+    /// </summary>
+    [JsonPropertyName("sourceSolution")]
+    public string SourceSolution { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets how target solutions are determined.
+    /// </summary>
+    [JsonPropertyName("targetMode")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public AttributeDiffTargetMode TargetMode { get; set; } = AttributeDiffTargetMode.AllBelow;
+
+    /// <summary>
+    /// Gets or sets the target solution names when TargetMode is Specific.
+    /// Diff is true if source differs from ANY of these targets.
+    /// </summary>
+    [JsonPropertyName("targetSolutions")]
+    public List<string>? TargetSolutions { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether to only check attributes marked as changed in the source layer.
+    /// </summary>
+    [JsonPropertyName("onlyChangedAttributes")]
+    public bool OnlyChangedAttributes { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets specific attribute names to check. Null means check any attribute.
+    /// </summary>
+    [JsonPropertyName("attributeNames")]
+    public List<string>? AttributeNames { get; set; }
+
+    /// <summary>
+    /// Gets or sets the matching logic when multiple attribute names are specified.
+    /// </summary>
+    [JsonPropertyName("attributeMatchLogic")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public AttributeMatchLogic AttributeMatchLogic { get; set; } = AttributeMatchLogic.Any;
 }
 
 /// <summary>

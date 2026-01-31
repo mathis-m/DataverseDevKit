@@ -30,6 +30,9 @@ public class FilterEvaluator
             LayerQueryFilterNode layerQuery => EvaluateLayerQuery(layerQuery, component),
             SolutionQueryFilterNode solutionQuery => EvaluateSolutionQueryFilter(solutionQuery, component),
             LayerAttributeFilterNode layerAttribute => EvaluateLayerAttribute(layerAttribute, component),
+            LayerAttributeQueryFilterNode layerAttrQuery => EvaluateLayerAttributeQuery(layerAttrQuery, component),
+            HasRelevantChangesFilterNode => false, // HAS_RELEVANT_CHANGES only valid inside LAYER_ATTRIBUTE_QUERY context
+            HasAttributeDiffFilterNode diff => EvaluateHasAttributeDiffAtComponentLevel(diff, component),
             
             // Logical operators
             AndFilterNode and => EvaluateAnd(and, component),
@@ -284,5 +287,168 @@ public class FilterEvaluator
                 return EvaluateStringOperator(filter.Operator, attrValue, filter.Value);
             });
         });
+    }
+
+    /// <summary>
+    /// Evaluates a LAYER_ATTRIBUTE_QUERY filter.
+    /// This filter scopes attribute queries to a specific solution's layer.
+    /// </summary>
+    private bool EvaluateLayerAttributeQuery(LayerAttributeQueryFilterNode filter, Component component)
+    {
+        // Find the layer for the specified solution
+        var layer = component.Layers.FirstOrDefault(
+            l => l.SolutionName.Equals(filter.Solution, StringComparison.OrdinalIgnoreCase));
+
+        if (layer == null)
+        {
+            // Component doesn't have a layer for this solution
+            return false;
+        }
+
+        // Evaluate the nested attribute filter against this specific layer
+        if (filter.AttributeFilter == null)
+        {
+            // No filter means the layer exists, which is true at this point
+            return true;
+        }
+
+        return EvaluateLayerAttributeFilter(filter.AttributeFilter, layer);
+    }
+
+    /// <summary>
+    /// Evaluates a filter node in the context of a specific layer's attributes.
+    /// This is used inside LAYER_ATTRIBUTE_QUERY to evaluate nested filters.
+    /// </summary>
+    private bool EvaluateLayerAttributeFilter(FilterNode filter, Layer layer)
+    {
+        return filter switch
+        {
+            // Predicates
+            HasRelevantChangesFilterNode => EvaluateHasRelevantChanges(layer),
+            HasAttributeDiffFilterNode diff => EvaluateHasAttributeDiff(diff, layer),
+
+            // Logical operators - recurse with layer context
+            AndFilterNode and => and.Children.All(child => EvaluateLayerAttributeFilter(child, layer)),
+            OrFilterNode or => or.Children.Any(child => EvaluateLayerAttributeFilter(child, layer)),
+            NotFilterNode not => !EvaluateLayerAttributeFilter(not.Child!, layer),
+
+            // Unknown filter type in layer context - default to true
+            _ => true
+        };
+    }
+
+    /// <summary>
+    /// Evaluates if a layer has any relevant (non-system) changes.
+    /// A layer has relevant changes if it has at least one changed attribute
+    /// whose name is not in the excluded attributes list.
+    /// </summary>
+    private static bool EvaluateHasRelevantChanges(Layer layer)
+    {
+        return layer.Attributes.Any(attr =>
+            attr.IsChanged &&
+            !FilterConstants.ExcludedAttributeNames.Contains(attr.AttributeName));
+    }
+
+    /// <summary>
+    /// Evaluates HAS_ATTRIBUTE_DIFF at the component level (not inside LAYER_ATTRIBUTE_QUERY).
+    /// Finds the source layer by solution name, then evaluates the diff.
+    /// </summary>
+    private bool EvaluateHasAttributeDiffAtComponentLevel(HasAttributeDiffFilterNode filter, Component component)
+    {
+        // Find the source layer by solution name
+        var sourceLayer = component.Layers.FirstOrDefault(
+            l => l.SolutionName.Equals(filter.SourceSolution, StringComparison.OrdinalIgnoreCase));
+
+        if (sourceLayer == null)
+        {
+            // Source layer not found - no match
+            return false;
+        }
+
+        return EvaluateHasAttributeDiff(filter, sourceLayer);
+    }
+
+    /// <summary>
+    /// Evaluates if a layer has attribute differences compared to target layers.
+    /// </summary>
+    private bool EvaluateHasAttributeDiff(HasAttributeDiffFilterNode filter, Layer sourceLayer)
+    {
+        // Get the component to access all layers
+        var component = sourceLayer.Component;
+        if (component == null)
+        {
+            return false;
+        }
+
+        // Get source attributes to check
+        var sourceAttributes = sourceLayer.Attributes.AsEnumerable();
+
+        // Filter by IsChanged if onlyChangedAttributes is true
+        if (filter.OnlyChangedAttributes)
+        {
+            sourceAttributes = sourceAttributes.Where(a => a.IsChanged);
+        }
+
+        // Exclude system attributes (same as HAS_RELEVANT_CHANGES)
+        sourceAttributes = sourceAttributes.Where(a =>
+            !FilterConstants.ExcludedAttributeNames.Contains(a.AttributeName));
+
+        // Filter by specific attribute names if specified
+        if (filter.AttributeNames != null && filter.AttributeNames.Count > 0)
+        {
+            sourceAttributes = sourceAttributes.Where(a =>
+                filter.AttributeNames.Any(name => 
+                    a.AttributeName.Equals(name, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        var sourceAttrList = sourceAttributes.ToList();
+        if (sourceAttrList.Count == 0)
+        {
+            // No attributes to check means no diff
+            return false;
+        }
+
+        // Get target layers based on TargetMode
+        IEnumerable<Layer> targetLayers;
+        if (filter.TargetMode == AttributeDiffTargetMode.AllBelow)
+        {
+            // All layers with lower ordinal
+            targetLayers = component.Layers.Where(l => l.Ordinal < sourceLayer.Ordinal);
+        }
+        else
+        {
+            // Specific target solutions
+            var targets = filter.TargetSolutions ?? new List<string>();
+            targetLayers = component.Layers.Where(l =>
+                targets.Any(t => l.SolutionName.Equals(t, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        var targetLayerList = targetLayers.ToList();
+        if (targetLayerList.Count == 0)
+        {
+            // No target layers to compare against - all source attributes are "different"
+            return sourceAttrList.Count > 0;
+        }
+
+        // Collect all target attribute hashes for efficient comparison
+        var targetHashes = targetLayerList
+            .SelectMany(l => l.Attributes)
+            .Where(a => a.AttributeHash != null)
+            .Select(a => a.AttributeHash!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Check for differences based on match logic
+        if (filter.AttributeMatchLogic == AttributeMatchLogic.All)
+        {
+            // ALL attributes must differ (none found in targets)
+            return sourceAttrList.All(srcAttr =>
+                srcAttr.AttributeHash == null || !targetHashes.Contains(srcAttr.AttributeHash));
+        }
+        else
+        {
+            // ANY attribute differs (at least one not found in targets)
+            return sourceAttrList.Any(srcAttr =>
+                srcAttr.AttributeHash == null || !targetHashes.Contains(srcAttr.AttributeHash));
+        }
     }
 }

@@ -1,16 +1,25 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { hostBridge } from '@ddk/host-sdk';
-import { ComponentResult, IndexResponse, IndexCompletionEvent, FilterNode } from '../types';
+import { ComponentResult, IndexResponse, IndexCompletionEvent, FilterNode, AttributeDiff, IndexMetadata, QueryResultEvent, QueryAcknowledgment } from '../types';
 import { AnalyticsData } from '../types/analytics';
 import { transformFilterForBackend } from '../utils/filterTransform';
+import { useAppStore } from '../store/useAppStore';
 
 const PLUGIN_ID = 'com.ddk.solutionlayeranalyzer';
 
+/** Generates a unique query ID */
+const generateQueryId = () => `q_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
 export const usePluginApi = () => {
   const [indexing, setIndexing] = useState(false);
-  const [querying, setQuerying] = useState(false);
   const [diffing, setDiffing] = useState(false);
   const [indexCompletion, setIndexCompletion] = useState<IndexCompletionEvent | null>(null);
+  
+  // Get store actions for query state management
+  const { setQueryState, setAnalysisState, queryState } = useAppStore();
+  
+  // Ref to track the latest query ID for event handler
+  const latestQueryIdRef = useRef<string | null>(null);
 
   // Listen for index completion events
   useEffect(() => {
@@ -32,6 +41,55 @@ export const usePluginApi = () => {
       unsubscribe();
     };
   }, []);
+
+  // Listen for query result events
+  useEffect(() => {
+    const unsubscribe = hostBridge.addEventListener('plugin:sla:query-result', (event) => {
+      console.log('Query result event received:', event);
+      try {
+        const payload = typeof event.payload === 'string'
+          ? JSON.parse(event.payload)
+          : event.payload;
+        const result = payload as QueryResultEvent;
+        
+        // Only process if this is the latest query
+        if (result.queryId !== latestQueryIdRef.current) {
+          console.log(`Ignoring stale query result: ${result.queryId} (latest: ${latestQueryIdRef.current})`);
+          return;
+        }
+        
+        if (result.success) {
+          // Update analysis state with the results
+          setAnalysisState({
+            allComponents: result.rows || [],
+            filteredComponents: result.rows || [],
+          });
+          
+          setQueryState({
+            isQuerying: false,
+            lastQueryStats: result.stats || null,
+            lastError: null,
+          });
+        } else {
+          console.error('Query failed:', result.errorMessage);
+          setQueryState({
+            isQuerying: false,
+            lastError: result.errorMessage || 'Query failed',
+          });
+        }
+      } catch (error) {
+        console.error('Failed to parse query result event:', error);
+        setQueryState({
+          isQuerying: false,
+          lastError: 'Failed to parse query result',
+        });
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [setAnalysisState, setQueryState]);
 
   const indexSolutions = useCallback(async (
     sourceSolutions: string[],
@@ -65,13 +123,64 @@ export const usePluginApi = () => {
     take = 1000,
     connectionId: string = 'default'
   ): Promise<ComponentResult[]> => {
-    setQuerying(true);
+    // Generate a new query ID
+    const queryId = generateQueryId();
+    latestQueryIdRef.current = queryId;
+    
+    setQueryState({
+      latestQueryId: queryId,
+      isQuerying: true,
+      lastError: null,
+    });
+    
+    try {
+      const payload = JSON.stringify({
+        queryId,
+        connectionId,
+        filters: transformFilterForBackend(filters ?? null),
+        paging: { skip, take },
+        sort: [{ field: 'componentType', dir: 'asc' }],
+        useEventResponse: true, // Use event-based response
+      });
+      
+      const result: any = await hostBridge.invokePluginCommand(PLUGIN_ID, 'query', payload);
+      const ack = result as QueryAcknowledgment;
+      
+      if (!ack.started) {
+        throw new Error(ack.errorMessage || 'Query failed to start');
+      }
+      
+      // Return empty array immediately - actual results will come via event
+      // The caller should rely on the store state for results
+      return [];
+    } catch (error) {
+      console.error('Query error:', error);
+      setQueryState({
+        isQuerying: false,
+        lastError: error instanceof Error ? error.message : 'Query failed',
+      });
+      throw error;
+    }
+  }, [setQueryState]);
+
+  /**
+   * Synchronous query that waits for results (for backward compatibility).
+   * Use queryComponents for event-based queries.
+   */
+  const queryComponentsSync = useCallback(async (
+    filters?: FilterNode | null,
+    skip = 0,
+    take = 1000,
+    connectionId: string = 'default'
+  ): Promise<ComponentResult[]> => {
+    setQueryState({ isQuerying: true, lastError: null });
     try {
       const payload = JSON.stringify({
         connectionId,
         filters: transformFilterForBackend(filters ?? null),
         paging: { skip, take },
         sort: [{ field: 'componentType', dir: 'asc' }],
+        useEventResponse: false, // Synchronous response
       });
       
       const result: any = await hostBridge.invokePluginCommand(PLUGIN_ID, 'query', payload);
@@ -80,9 +189,9 @@ export const usePluginApi = () => {
       console.error('Query error:', error);
       throw error;
     } finally {
-      setQuerying(false);
+      setQueryState({ isQuerying: false });
     }
-  }, []);
+  }, [setQueryState]);
 
   const getComponentDetails = useCallback(async (
     componentId: string,
@@ -103,14 +212,14 @@ export const usePluginApi = () => {
     leftSolution: string,
     rightSolution: string,
     connectionId: string = 'default'
-  ): Promise<{ leftText: string; rightText: string; mime: string; warnings?: string[] }> => {
+  ): Promise<{ attributes: AttributeDiff[]; warnings?: string[] }> => {
     setDiffing(true);
     try {
       const payload = JSON.stringify({
         componentId,
         connectionId,
-        left: { solutionName: leftSolution, payloadType: 'auto' },
-        right: { solutionName: rightSolution, payloadType: 'auto' },
+        left: { solutionName: leftSolution },
+        right: { solutionName: rightSolution },
       });
       
       const result: any = await hostBridge.invokePluginCommand(PLUGIN_ID, 'diff', payload);
@@ -218,9 +327,21 @@ export const usePluginApi = () => {
     }
   }, []);
 
+  const getIndexMetadata = useCallback(async (connectionId: string = 'default'): Promise<IndexMetadata> => {
+    try {
+      const payload = JSON.stringify({ connectionId });
+      const result = await hostBridge.invokePluginCommand(PLUGIN_ID, 'getIndexMetadata', payload);
+      return result as IndexMetadata;
+    } catch (error) {
+      console.error('Get index metadata error:', error);
+      throw error;
+    }
+  }, []);
+
   return {
     indexSolutions,
     queryComponents,
+    queryComponentsSync,
     getComponentDetails,
     diffComponentLayers,
     clearIndex,
@@ -230,10 +351,12 @@ export const usePluginApi = () => {
     loadFilterConfigs,
     fetchSolutions,
     getComponentTypes,
+    getIndexMetadata,
     indexCompletion,
+    queryState,
     loading: {
       indexing,
-      querying,
+      querying: queryState.isQuerying,
       diffing,
     },
     getAnalytics: async (connectionId: string = 'default'): Promise<AnalyticsData> => {
