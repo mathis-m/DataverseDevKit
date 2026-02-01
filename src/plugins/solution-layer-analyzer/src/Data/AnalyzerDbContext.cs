@@ -55,6 +55,16 @@ public sealed class AnalyzerDbContext : DbContext
     public DbSet<LayerAttribute> LayerAttributes => Set<LayerAttribute>();
 
     /// <summary>
+    /// Gets or sets the ReportGroups table.
+    /// </summary>
+    public DbSet<ReportGroup> ReportGroups => Set<ReportGroup>();
+
+    /// <summary>
+    /// Gets or sets the Reports table.
+    /// </summary>
+    public DbSet<Report> Reports => Set<Report>();
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="AnalyzerDbContext"/> class.
     /// </summary>
     public AnalyzerDbContext()
@@ -184,6 +194,30 @@ public sealed class AnalyzerDbContext : DbContext
             entity.HasIndex(e => new { e.ObjectId, e.ComponentTypeCode }).IsUnique();
             entity.HasIndex(e => e.LogicalName);
             entity.HasIndex(e => e.TableLogicalName);
+        });
+
+        // Configure ReportGroup entity
+        modelBuilder.Entity<ReportGroup>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.ConnectionId);
+            entity.HasIndex(e => new { e.ConnectionId, e.DisplayOrder });
+            entity.HasIndex(e => e.CreatedAt);
+        });
+
+        // Configure Report entity
+        modelBuilder.Entity<Report>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.ConnectionId);
+            entity.HasIndex(e => e.GroupId);
+            entity.HasIndex(e => new { e.ConnectionId, e.DisplayOrder });
+            entity.HasIndex(e => e.Severity);
+            entity.HasIndex(e => e.CreatedAt);
+            entity.HasOne(e => e.Group)
+                  .WithMany(e => e.Reports)
+                  .HasForeignKey(e => e.GroupId)
+                  .OnDelete(DeleteBehavior.SetNull);
         });
     }
 }
