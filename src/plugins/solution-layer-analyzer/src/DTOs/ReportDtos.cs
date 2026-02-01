@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Ddk.SolutionLayerAnalyzer.Models;
 
 namespace Ddk.SolutionLayerAnalyzer.DTOs;
@@ -46,6 +47,7 @@ public class ReportConfigDefinition
 /// <summary>
 /// Supported formats for report config serialization
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ReportConfigFormat
 {
     Json,
@@ -155,6 +157,7 @@ public class ReportComponentResult
 /// <summary>
 /// Report output format
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ReportOutputFormat
 {
     Yaml,
@@ -165,6 +168,7 @@ public enum ReportOutputFormat
 /// <summary>
 /// Report verbosity level
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ReportVerbosity
 {
     /// <summary>
