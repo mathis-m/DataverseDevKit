@@ -666,7 +666,7 @@ public class ReportService
                 LogicalName = component.LogicalName,
                 DisplayName = component.DisplayName,
                 Solutions = component.Solutions,
-                MakePortalUrl = $"https://make.powerapps.com/environments/{connectionId}"
+                MakePortalUrl = GenerateMakePortalUrl(connectionId, component)
             };
 
             // Add layer information based on verbosity
@@ -710,6 +710,41 @@ public class ReportService
         }
 
         return results;
+    }
+
+    private static string GenerateMakePortalUrl(string connectionId, ReportComponentResult component)
+    {
+        var baseUrl = $"https://make.powerapps.com/environments/{connectionId}";
+        
+        // Generate component-specific URL based on component type
+        var path = component.ComponentTypeName switch
+        {
+            "Entity" when !string.IsNullOrEmpty(component.LogicalName) 
+                => $"/entities/{component.LogicalName}",
+            "Attribute" when !string.IsNullOrEmpty(component.LogicalName)
+                => $"/entities/{component.LogicalName}/fields",
+            "SystemForm" 
+                => $"/solutions/forms/{component.ComponentId}",
+            "SavedQuery" 
+                => $"/solutions/views/{component.ComponentId}",
+            "SavedQueryVisualization" 
+                => $"/solutions/charts/{component.ComponentId}",
+            "WebResource" 
+                => $"/solutions/webresources/{component.ComponentId}",
+            "Workflow" 
+                => $"/solutions/processes/{component.ComponentId}",
+            "SDKMessageProcessingStep" 
+                => $"/solutions/plugins/{component.ComponentId}",
+            "AppModule" 
+                => $"/apps/{component.ComponentId}",
+            "SiteMap" 
+                => $"/solutions/sitemaps/{component.ComponentId}",
+            "OptionSet" when !string.IsNullOrEmpty(component.LogicalName)
+                => $"/solutions/optionsets/{component.LogicalName}",
+            _ => $"/solutions" // Default to solutions page
+        };
+        
+        return baseUrl + path;
     }
 
     private async Task<ReportDto> GetReportDtoAsync(int reportId, string connectionId, CancellationToken cancellationToken)

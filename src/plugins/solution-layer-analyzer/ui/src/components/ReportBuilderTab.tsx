@@ -33,6 +33,7 @@ import {
   ArrowExportRegular,
   FilterRegular,
   ArrowSyncRegular,
+  DismissRegular,
 } from '@fluentui/react-icons';
 import { usePluginApi } from '../hooks/usePluginApi';
 import { useAppStore } from '../store/useAppStore';
@@ -136,6 +137,8 @@ export const ReportBuilderTab: React.FC = () => {
   const pluginApi = usePluginApi();
   const availableSolutions = useAppStore((state) => state.availableSolutions);
   const indexConfig = useAppStore((state) => state.indexConfig);
+  const setFilterBarState = useAppStore((state) => state.setFilterBarState);
+  const setSelectedTab = useAppStore((state) => state.setSelectedTab);
   
   const [config, setConfig] = useState<ReportConfig>({
     sourceSolutions: indexConfig.sourceSolutions || [],
@@ -155,6 +158,21 @@ export const ReportBuilderTab: React.FC = () => {
   const [currentFilter, setCurrentFilter] = useState<FilterNode | null>(null);
   const [reportResults, setReportResults] = useState<any>(null);
   const [isRunning, setIsRunning] = useState(false);
+  const [verbosity, setVerbosity] = useState<'Basic' | 'Medium' | 'Verbose'>('Basic');
+
+  // Execute filter - navigate to Analysis tab with the report's filter
+  const handleExecuteFilter = useCallback((report: Report) => {
+    try {
+      const filter = JSON.parse(report.queryJson);
+      setFilterBarState({ 
+        advancedFilter: filter,
+        advancedMode: true 
+      });
+      setSelectedTab('analysis');
+    } catch (error) {
+      console.error('Failed to parse filter:', error);
+    }
+  }, [setFilterBarState, setSelectedTab]);
 
   // Add new group
   const handleAddGroup = useCallback(() => {
@@ -327,21 +345,32 @@ export const ReportBuilderTab: React.FC = () => {
   const handleRunReports = useCallback(async () => {
     setIsRunning(true);
     try {
-      // Execute reports via query
-      const results = await pluginApi.queryComponentsSync(null, 0, 1000, 'default');
-      setReportResults({ components: results });
+      const result = await pluginApi.executeCommand('generateReportOutput', {
+        connectionId: 'default',
+        format: 'Json',
+        verbosity: verbosity,
+      });
+      setReportResults(result);
     } catch (error) {
       console.error('Failed to run reports:', error);
     } finally {
       setIsRunning(false);
     }
-  }, [pluginApi]);
+  }, [pluginApi, verbosity]);
 
   // Export results
   const handleExportResults = useCallback(async (format: 'yaml' | 'json' | 'csv') => {
     try {
-      // Export results by downloading as file
-      const blob = new Blob([JSON.stringify(reportResults, null, 2)], { type: 'application/json' });
+      const formatMap = { yaml: 'Yaml', json: 'Json', csv: 'Csv' };
+      const result = await pluginApi.executeCommand('generateReportOutput', {
+        connectionId: 'default',
+        format: formatMap[format],
+        verbosity: verbosity,
+      });
+      
+      const content = result.outputContent || JSON.stringify(result, null, 2);
+      const mimeTypes = { yaml: 'application/x-yaml', json: 'application/json', csv: 'text/csv' };
+      const blob = new Blob([content], { type: mimeTypes[format] });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -351,7 +380,7 @@ export const ReportBuilderTab: React.FC = () => {
     } catch (error) {
       console.error('Failed to export results:', error);
     }
-  }, [reportResults]);
+  }, [pluginApi, verbosity]);
 
   return (
     <div className={styles.container}>
@@ -384,6 +413,15 @@ export const ReportBuilderTab: React.FC = () => {
           Save Config
         </Button>
         <Divider vertical />
+        <Text>Verbosity:</Text>
+        <Dropdown
+          value={verbosity}
+          onOptionSelect={(_, d) => setVerbosity(d.optionValue as any)}
+        >
+          <Option value="Basic">Basic</Option>
+          <Option value="Medium">Medium</Option>
+          <Option value="Verbose">Verbose</Option>
+        </Dropdown>
         <Button
           icon={<PlayRegular />}
           appearance="primary"
@@ -479,6 +517,12 @@ export const ReportBuilderTab: React.FC = () => {
                 <div className={styles.reportActions}>
                   <Button
                     size="small"
+                    icon={<FilterRegular />}
+                    onClick={() => handleExecuteFilter(report)}
+                    title="Execute Filter in Analysis Tab"
+                  />
+                  <Button
+                    size="small"
                     icon={<ArrowUpRegular />}
                     onClick={() => handleMoveReport(groupIndex, reportIndex, 'up')}
                     disabled={reportIndex === 0}
@@ -547,6 +591,12 @@ export const ReportBuilderTab: React.FC = () => {
                 <div className={styles.reportActions}>
                   <Button
                     size="small"
+                    icon={<FilterRegular />}
+                    onClick={() => handleExecuteFilter(report)}
+                    title="Execute Filter in Analysis Tab"
+                  />
+                  <Button
+                    size="small"
                     icon={<ArrowUpRegular />}
                     onClick={() => handleMoveReport(null, reportIndex, 'up')}
                     disabled={reportIndex === 0}
@@ -584,10 +634,122 @@ export const ReportBuilderTab: React.FC = () => {
       {/* Results Display */}
       {reportResults && (
         <div className={styles.resultsContainer}>
-          <Text weight="semibold" size={500}>Report Results</Text>
-          <pre style={{ marginTop: tokens.spacingVerticalM, maxHeight: '400px', overflow: 'auto' }}>
-            {JSON.stringify(reportResults, null, 2)}
-          </pre>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalM }}>
+            <Text weight="semibold" size={500}>Report Results</Text>
+            <Button
+              size="small"
+              icon={<DismissRegular />}
+              onClick={() => setReportResults(null)}
+            >
+              Close
+            </Button>
+          </div>
+          
+          {reportResults.summary && (
+            <Card style={{ marginBottom: tokens.spacingVerticalM, padding: tokens.spacingVerticalM }}>
+              <Text weight="semibold">Summary</Text>
+              <div style={{ display: 'flex', gap: tokens.spacingHorizontalL, marginTop: tokens.spacingVerticalS }}>
+                <div>
+                  <Text size={200}>Total Reports: {reportResults.summary.totalReports}</Text>
+                </div>
+                <div>
+                  <Badge color="danger">Critical: {reportResults.summary.criticalFindings}</Badge>
+                </div>
+                <div>
+                  <Badge color="warning">Warning: {reportResults.summary.warningFindings}</Badge>
+                </div>
+                <div>
+                  <Badge color="informative">Info: {reportResults.summary.informationalFindings}</Badge>
+                </div>
+                <div>
+                  <Text size={200}>Total Components: {reportResults.summary.totalComponents}</Text>
+                </div>
+              </div>
+            </Card>
+          )}
+          
+          {reportResults.reports && reportResults.reports.map((report: any, idx: number) => (
+            <Card key={idx} style={{ marginBottom: tokens.spacingVerticalM }}>
+              <div style={{ padding: tokens.spacingVerticalM }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalS }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
+                    <Text weight="semibold">{report.name}</Text>
+                    <Badge
+                      color={
+                        report.severity === 'Critical' ? 'danger' :
+                        report.severity === 'Warning' ? 'warning' :
+                        'informative'
+                      }
+                    >
+                      {report.severity}
+                    </Badge>
+                    {report.group && <Badge appearance="outline">{report.group}</Badge>}
+                  </div>
+                  <Text size={200}>{report.totalMatches} matches</Text>
+                </div>
+                
+                {report.recommendedAction && (
+                  <Text size={200} style={{ color: tokens.colorNeutralForeground3, marginBottom: tokens.spacingVerticalS }}>
+                    Action: {report.recommendedAction}
+                  </Text>
+                )}
+                
+                {report.components && report.components.length > 0 && (
+                  <div style={{ marginTop: tokens.spacingVerticalM }}>
+                    <Text size={200} weight="semibold">Components ({report.components.length}):</Text>
+                    <div style={{ maxHeight: '200px', overflow: 'auto', marginTop: tokens.spacingVerticalXS }}>
+                      {report.components.map((comp: any, compIdx: number) => (
+                        <div key={compIdx} style={{ 
+                          padding: tokens.spacingVerticalXS,
+                          borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}>
+                          <div style={{ flex: 1 }}>
+                            <Text size={200}>
+                              {comp.displayName || comp.logicalName || comp.componentId} ({comp.componentTypeName})
+                            </Text>
+                            {comp.solutions && comp.solutions.length > 0 && (
+                              <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
+                                {' '}- Solutions: {comp.solutions.join(', ')}
+                              </Text>
+                            )}
+                            {verbosity !== 'Basic' && comp.layers && comp.layers.length > 0 && (
+                              <div style={{ marginTop: tokens.spacingVerticalXXS }}>
+                                <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
+                                  Layers: {comp.layers.map((l: any) => l.solutionName).join(' → ')}
+                                </Text>
+                                {verbosity === 'Verbose' && comp.layers.some((l: any) => l.changedAttributes?.length > 0) && (
+                                  <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
+                                    {' '}Changed: {comp.layers.flatMap((l: any) => 
+                                      (l.changedAttributes || []).map((a: any) => a.attributeName)
+                                    ).join(', ')}
+                                  </Text>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          {comp.makePortalUrl && (
+                            <Button
+                              size="small"
+                              appearance="subtle"
+                              as="a"
+                              href={comp.makePortalUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              View in Portal
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </Card>
+          ))}
         </div>
       )}
 
@@ -665,6 +827,13 @@ export const ReportBuilderTab: React.FC = () => {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalM }}>
                     <Label>Filter Query</Label>
                     <div style={{ display: 'flex', gap: tokens.spacingHorizontalS }}>
+                      <Button
+                        size="small"
+                        icon={<FilterRegular />}
+                        onClick={() => handleExecuteFilter(editingReport.report)}
+                      >
+                        Execute Filter
+                      </Button>
                       <Button
                         size="small"
                         icon={<ArrowSyncRegular />}
