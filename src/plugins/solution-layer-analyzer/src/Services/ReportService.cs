@@ -714,37 +714,9 @@ public class ReportService
 
     private static string GenerateMakePortalUrl(string connectionId, ReportComponentResult component)
     {
-        var baseUrl = $"https://make.powerapps.com/environments/{connectionId}";
-        
-        // Generate component-specific URL based on component type
-        var path = component.ComponentTypeName switch
-        {
-            "Entity" when !string.IsNullOrEmpty(component.LogicalName) 
-                => $"/entities/{component.LogicalName}",
-            "Attribute" when !string.IsNullOrEmpty(component.LogicalName)
-                => $"/entities/{component.LogicalName}/fields",
-            "SystemForm" 
-                => $"/solutions/forms/{component.ComponentId}",
-            "SavedQuery" 
-                => $"/solutions/views/{component.ComponentId}",
-            "SavedQueryVisualization" 
-                => $"/solutions/charts/{component.ComponentId}",
-            "WebResource" 
-                => $"/solutions/webresources/{component.ComponentId}",
-            "Workflow" 
-                => $"/solutions/processes/{component.ComponentId}",
-            "SDKMessageProcessingStep" 
-                => $"/solutions/plugins/{component.ComponentId}",
-            "AppModule" 
-                => $"/apps/{component.ComponentId}",
-            "SiteMap" 
-                => $"/solutions/sitemaps/{component.ComponentId}",
-            "OptionSet" when !string.IsNullOrEmpty(component.LogicalName)
-                => $"/solutions/optionsets/{component.LogicalName}",
-            _ => $"/solutions" // Default to solutions page
-        };
-        
-        return baseUrl + path;
+        // Always link to the layers view for all component types
+        // Format: https://make.powerapps.com/environments/<env id>/solutions/fd140aaf-4df4-11dd-bd17-0019b9312238/objects/all/<component id>/layers
+        return $"https://make.powerapps.com/environments/{connectionId}/solutions/fd140aaf-4df4-11dd-bd17-0019b9312238/objects/all/{component.ComponentId}/layers";
     }
 
     private async Task<ReportDto> GetReportDtoAsync(int reportId, string connectionId, CancellationToken cancellationToken)
