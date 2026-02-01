@@ -1,0 +1,53 @@
+# Solution Layer Analyzer Configuration
+# This file defines the global settings and reports for analyzing Dataverse solutions
+
+# Source solutions to analyze (typically your core/base solutions)
+sourceSolutions:
+  - CoreSolution
+
+# Target solutions to compare against (typically your project-specific solutions)
+targetSolutions:
+  - Project1
+  - Project2
+
+# Optional: Component types to include (if omitted, all types are included)
+# componentTypes:
+#   - 1   # Entity
+#   - 24  # SystemForm
+#   - 26  # SavedQuery
+
+# Report groups organize related reports together
+reportGroups:
+  - name: Project 1 Analysis
+    displayOrder: 1
+    reports:
+      - name: Empty Layers that can be removed
+        description: Identifies layers with no actual changes that can be safely removed
+        severity: Information
+        recommendedAction: Remove empty layer from solution
+        displayOrder: 1
+        queryJson: '{"type":"AND","children":[{"type":"ORDER_FLEX","solutions":["CoreSolution","Project1"]},{"type":"LAYER_ATTRIBUTE_QUERY","solution":"Project1","condition":{"type":"NOT","child":{"type":"LAYER_ATTRIBUTE_DIFF","solution":"Project1","compareTo":"CoreSolution"}}}]}'
+      
+      - name: Form or View layers that may need consolidation
+        description: Forms/Views customized in Project1 but not in other projects
+        severity: Warning
+        recommendedAction: Consider moving the customization to Core solution for future harmonization
+        displayOrder: 2
+        queryJson: '{"type":"AND","children":[{"type":"OR","children":[{"type":"ATTRIBUTE_QUERY","attribute":"ComponentType","operator":"EQUALS","value":"SavedQuery"},{"type":"ATTRIBUTE_QUERY","attribute":"ComponentType","operator":"EQUALS","value":"SystemForm"}]},{"type":"ORDER_FLEX","solutions":["CoreSolution","Project1"]},{"type":"NOT","child":{"type":"HAS","solutions":["Project2"]}},{"type":"LAYER_ATTRIBUTE_QUERY","solution":"Project1","condition":{"type":"LAYER_ATTRIBUTE_DIFF","solution":"Project1","compareTo":"CoreSolution"}}]}'
+      
+      - name: Form or View conflicts between projects
+        description: Forms/Views customized in multiple projects creating conflicts
+        severity: Critical
+        recommendedAction: Immediate action required by all projects overriding the view or form
+        displayOrder: 3
+        queryJson: '{"type":"AND","children":[{"type":"OR","children":[{"type":"ATTRIBUTE_QUERY","attribute":"ComponentType","operator":"EQUALS","value":"SavedQuery"},{"type":"ATTRIBUTE_QUERY","attribute":"ComponentType","operator":"EQUALS","value":"SystemForm"}]},{"type":"ORDER_FLEX","solutions":["CoreSolution","Project1"]},{"type":"HAS","solutions":["Project2"]},{"type":"LAYER_ATTRIBUTE_QUERY","solution":"Project1","condition":{"type":"LAYER_ATTRIBUTE_DIFF","solution":"Project1","compareTo":"CoreSolution"}}]}'
+      
+      - name: Non-UI component conflicts
+        description: Non-UI components (entities, attributes, etc.) with conflicting layers
+        severity: Critical
+        recommendedAction: Immediate action required, potential layer on shared concerns
+        displayOrder: 4
+        queryJson: '{"type":"AND","children":[{"type":"NOT","child":{"type":"OR","children":[{"type":"ATTRIBUTE_QUERY","attribute":"ComponentType","operator":"EQUALS","value":"SavedQuery"},{"type":"ATTRIBUTE_QUERY","attribute":"ComponentType","operator":"EQUALS","value":"SystemForm"}]}},{"type":"ORDER_FLEX","solutions":["CoreSolution","Project1"]},{"type":"LAYER_ATTRIBUTE_QUERY","solution":"Project1","condition":{"type":"LAYER_ATTRIBUTE_DIFF","solution":"Project1","compareTo":"CoreSolution"}}]}'
+
+# Ungrouped reports (not part of any group)
+ungroupedReports: []
