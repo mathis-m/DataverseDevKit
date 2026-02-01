@@ -1,8 +1,11 @@
+using System.Text.Json.Serialization;
+
 namespace Ddk.SolutionLayerAnalyzer.Models;
 
 /// <summary>
 /// Severity levels for reports
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ReportSeverity
 {
     /// <summary>

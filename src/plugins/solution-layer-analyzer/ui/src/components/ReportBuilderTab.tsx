@@ -152,9 +152,9 @@ export const ReportBuilderTab: React.FC = () => {
   const [editingReport, setEditingReport] = useState<{
     groupId: string | null;
     report: Report;
+    filterState: FilterNode | null; // Per-report filter state
   } | null>(null);
   const [showFilterBuilder, setShowFilterBuilder] = useState(false);
-  const [currentFilter, setCurrentFilter] = useState<FilterNode | null>(null);
   const [showRunDialog, setShowRunDialog] = useState(false);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [editingGroupName, setEditingGroupName] = useState('');
@@ -226,6 +226,7 @@ export const ReportBuilderTab: React.FC = () => {
     setEditingReport({
       groupId,
       report: newReport,
+      filterState: null,
     });
   }, [reportGroups, ungroupedReports.length, addReport]);
 
@@ -558,7 +559,10 @@ export const ReportBuilderTab: React.FC = () => {
                   <Button
                     size="small"
                     appearance="primary"
-                    onClick={() => setEditingReport({ groupId: group.id, report: { ...report } })}
+                    onClick={() => {
+                      const filter = report.queryJson ? JSON.parse(report.queryJson) : null;
+                      setEditingReport({ groupId: group.id, report: { ...report }, filterState: filter });
+                    }}
                   >
                     Edit
                   </Button>
@@ -632,7 +636,10 @@ export const ReportBuilderTab: React.FC = () => {
                   <Button
                     size="small"
                     appearance="primary"
-                    onClick={() => setEditingReport({ groupId: null, report: { ...report } })}
+                    onClick={() => {
+                      const filter = report.queryJson ? JSON.parse(report.queryJson) : null;
+                      setEditingReport({ groupId: null, report: { ...report }, filterState: filter });
+                    }}
                   >
                     Edit
                   </Button>
@@ -711,6 +718,26 @@ export const ReportBuilderTab: React.FC = () => {
                 </div>
 
                 <div className={styles.formField}>
+                  <Label htmlFor="report-group">Group</Label>
+                  <Dropdown
+                    id="report-group"
+                    value={editingReport.groupId || 'ungrouped'}
+                    onOptionSelect={(_, data) => {
+                      const newGroupId = data.optionValue === 'ungrouped' ? null : data.optionValue as string;
+                      setEditingReport({
+                        ...editingReport,
+                        groupId: newGroupId,
+                      });
+                    }}
+                  >
+                    <Option value="ungrouped">Ungrouped</Option>
+                    {reportGroups.map(group => (
+                      <Option key={group.id} value={group.id}>{group.name}</Option>
+                    ))}
+                  </Dropdown>
+                </div>
+
+                <div className={styles.formField}>
                   <Label htmlFor="report-action">Recommended Action</Label>
                   <Textarea
                     id="report-action"
@@ -741,9 +768,9 @@ export const ReportBuilderTab: React.FC = () => {
                         onClick={() => {
                           // Set filter from analysis tab
                           const analysisFilter = useAppStore.getState().filterBarState.advancedFilter;
-                          setCurrentFilter(analysisFilter);
                           setEditingReport({
                             ...editingReport,
+                            filterState: analysisFilter,
                             report: {
                               ...editingReport.report,
                               queryJson: JSON.stringify(analysisFilter),
@@ -765,11 +792,11 @@ export const ReportBuilderTab: React.FC = () => {
 
                   {showFilterBuilder && (
                     <AdvancedFilterBuilder
-                      initialFilter={currentFilter}
+                      initialFilter={editingReport.filterState}
                       onFilterChange={(newFilter: FilterNode | null) => {
-                        setCurrentFilter(newFilter);
                         setEditingReport({
                           ...editingReport,
+                          filterState: newFilter,
                           report: {
                             ...editingReport.report,
                             queryJson: JSON.stringify(newFilter),

@@ -131,11 +131,6 @@ export const ReportSummaryPanel: React.FC<ReportSummaryPanelProps> = ({ verbosit
   
   const { results, outputContent, outputFormat, summaryCollapsed, isRunning, progress, lastError } = reportRunState;
   
-  // Don't render if no results, not running, and no error
-  if (!results && !isRunning && !lastError) {
-    return null;
-  }
-  
   const toggleCollapsed = useCallback(() => {
     setReportRunState({ summaryCollapsed: !summaryCollapsed });
   }, [summaryCollapsed, setReportRunState]);
@@ -190,6 +185,11 @@ export const ReportSummaryPanel: React.FC<ReportSummaryPanelProps> = ({ verbosit
         return 'informative';
     }
   };
+  
+  // Don't render if no results, not running, and no error
+  if (!results && !isRunning && !lastError) {
+    return null;
+  }
   
   return (
     <div className={styles.container}>
