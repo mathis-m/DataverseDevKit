@@ -8,62 +8,64 @@ var rootCommand = new RootCommand("Dataverse DevKit Solution Layer Analyzer CLI 
 
 // Global options
 var configOption = new Option<FileInfo>(
-    aliases: new[] { "--config", "-c" },
+    aliases: ["--config", "-c"],
     description: "Path to the YAML configuration file"
-);
-configOption.IsRequired = true;
+)
+{
+    IsRequired = true
+};
 
 var connectionStringOption = new Option<string>(
-    aliases: new[] { "--connection-string", "-cs" },
+    aliases: ["--connection-string", "-cs"],
     description: "Dataverse connection string (alternative to interactive auth)"
 );
 
 var clientIdOption = new Option<string>(
-    aliases: new[] { "--client-id" },
+    aliases: ["--client-id"],
     description: "Azure AD client ID for service principal authentication"
 );
 
 var clientSecretOption = new Option<string>(
-    aliases: new[] { "--client-secret" },
+    aliases: ["--client-secret"],
     description: "Azure AD client secret for service principal authentication"
 );
 
 var tenantIdOption = new Option<string>(
-    aliases: new[] { "--tenant-id" },
+    aliases: ["--tenant-id"],
     description: "Azure AD tenant ID for service principal authentication"
 );
 
 var environmentUrlOption = new Option<string>(
-    aliases: new[] { "--environment-url", "-e" },
+    aliases: ["--environment-url", "-e"],
     description: "Dataverse environment URL"
 );
 environmentUrlOption.IsRequired = true;
 
 var verbosityOption = new Option<string>(
-    aliases: new[] { "--verbosity", "-v" },
+    aliases: ["--verbosity", "-v"],
     getDefaultValue: () => "normal",
     description: "Console log verbosity (quiet, minimal, normal, detailed)"
 );
 
 var outputPathOption = new Option<DirectoryInfo>(
-    aliases: new[] { "--output", "-o" },
+    aliases: ["--output", "-o"],
     getDefaultValue: () => new DirectoryInfo("."),
     description: "Output directory for reports and plugin logs"
 );
 
 var formatOption = new Option<string>(
-    aliases: new[] { "--format", "-f" },
+    aliases: ["--format", "-f"],
     getDefaultValue: () => "yaml",
     description: "Report output format (yaml, json, csv)"
 );
 
 var failOnSeverityOption = new Option<string>(
-    aliases: new[] { "--fail-on-severity" },
+    aliases: ["--fail-on-severity"],
     description: "Fail pipeline if findings of this severity or higher (critical, warning, information)"
 );
 
 var maxFindingsOption = new Option<int?>(
-    aliases: new[] { "--max-findings" },
+    aliases: ["--max-findings"],
     description: "Maximum number of findings allowed before failing"
 );
 
@@ -90,7 +92,7 @@ rootCommand.SetHandler(async (context) =>
 
 return await rootCommand.InvokeAsync(args);
 
-static ReportExecutor CreateCli(InvocationContext context)
+ReportExecutor CreateCli(InvocationContext context)
 {
     var config = context.ParseResult.GetValueForOption(configOption)!;
     var connectionString = context.ParseResult.GetValueForOption(connectionStringOption);
@@ -104,18 +106,18 @@ static ReportExecutor CreateCli(InvocationContext context)
     var failOnSeverity = context.ParseResult.GetValueForOption(failOnSeverityOption);
     var maxFindings = context.ParseResult.GetValueForOption(maxFindingsOption);
 
-    var logLevel = verbosity.ToLowerInvariant() switch
+    var logLevel = verbosity.ToUpperInvariant() switch
     {
-        "quiet" => LogLevel.Error,
-        "minimal" => LogLevel.Warning,
-        "normal" => LogLevel.Information,
-        "detailed" => LogLevel.Debug,
+        "QUIET" => LogLevel.Error,
+        "MINIMAL" => LogLevel.Warning,
+        "NORMAL" => LogLevel.Information,
+        "DETAILED" => LogLevel.Debug,
         _ => LogLevel.Information
     };
 
     return new ReportExecutor(
         config,
-        environmentUrl,
+        new Uri(environmentUrl),
         connectionString,
         clientId,
         clientSecret,
@@ -124,5 +126,6 @@ static ReportExecutor CreateCli(InvocationContext context)
         output,
         format,
         failOnSeverity,
-        maxFindings);
+        maxFindings
+    );
 }

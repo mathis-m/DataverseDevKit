@@ -399,8 +399,7 @@ public class ReportService
         {
             SourceSolutions = indexConfig?.SourceSolutions.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList() ?? new List<string>(),
             TargetSolutions = indexConfig?.TargetSolutions.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList() ?? new List<string>(),
-            ComponentTypes = indexConfig?.ComponentTypes.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                .Select(int.Parse).ToList(),
+            ComponentTypes = indexConfig?.ComponentTypes.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList(),
             ReportGroups = groups.Select(g => new ConfigReportGroup
             {
                 Name = g.Name,

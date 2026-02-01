@@ -56,7 +56,7 @@ public class FileLogger : ILogger
 /// <summary>
 /// Simple logger factory for file logging
 /// </summary>
-public class FileLoggerProvider : ILoggerProvider
+public sealed class FileLoggerProvider : ILoggerProvider
 {
     private readonly string _logFilePath;
     private readonly LogLevel _minLogLevel;
@@ -74,5 +74,6 @@ public class FileLoggerProvider : ILoggerProvider
 
     public void Dispose()
     {
+        // No resources to dispose
     }
 }

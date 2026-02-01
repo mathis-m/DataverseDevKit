@@ -16,9 +16,9 @@ public class AnalyzerConfig
     public List<string> TargetSolutions { get; set; } = new();
     
     /// <summary>
-    /// Component types to include in analysis
+    /// Component types to include in analysis (e.g., "Entity", "SystemForm", "SavedQuery")
     /// </summary>
-    public List<int>? ComponentTypes { get; set; }
+    public List<string>? ComponentTypes { get; set; }
     
     /// <summary>
     /// Report groups and their reports

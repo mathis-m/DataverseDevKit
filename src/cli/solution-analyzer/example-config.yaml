@@ -11,10 +11,14 @@ targetSolutions:
   - Project2
 
 # Optional: Component types to include (if omitted, all types are included)
+# Use string names instead of numeric values:
 # componentTypes:
-#   - 1   # Entity
-#   - 24  # SystemForm
-#   - 26  # SavedQuery
+#   - Entity
+#   - SystemForm
+#   - SavedQuery
+#   - Attribute
+#   - RibbonCustomization
+#   - WebResource
 
 # Report groups organize related reports together
 reportGroups:

@@ -14,7 +14,7 @@ namespace DataverseDevKit.SolutionAnalyzer.CLI;
 public class ReportExecutor
 {
     private readonly FileInfo _configFile;
-    private readonly string _environmentUrl;
+    private readonly Uri _environmentUrl;
     private readonly string? _connectionString;
     private readonly string? _clientId;
     private readonly string? _clientSecret;
@@ -28,7 +28,7 @@ public class ReportExecutor
 
     public ReportExecutor(
         FileInfo configFile,
-        string environmentUrl,
+        Uri environmentUrl,
         string? connectionString,
         string? clientId,
         string? clientSecret,
@@ -57,7 +57,7 @@ public class ReportExecutor
         }
 
         // Setup console logging for CLI
-        var loggerFactory = LoggerFactory.Create(builder =>
+        using var loggerFactory = LoggerFactory.Create(builder =>
         {
             builder.SetMinimumLevel(consoleLogLevel);
             builder.AddConsole();
@@ -88,16 +88,18 @@ public class ReportExecutor
             var plugin = new SolutionLayerAnalyzerPlugin();
             var pluginLogger = CreatePluginLogger();
             var serviceClientFactory = new CliServiceClientFactory(
-                _environmentUrl, 
+                _environmentUrl.AbsoluteUri,
                 _connectionString, 
                 _clientId, 
                 _clientSecret, 
-                _tenantId);
+                _tenantId
+            );
             
             var pluginContext = new CliPluginContext(
                 pluginLogger,
                 _outputDirectory.FullName,
-                serviceClientFactory);
+                serviceClientFactory
+            );
 
             _consoleLogger.LogDebug("Initializing plugin");
             await plugin.InitializeAsync(pluginContext, cancellationToken);
@@ -110,10 +112,10 @@ public class ReportExecutor
                 // Build index request from config
                 var indexRequest = new IndexRequest
                 {
-                    ConnectionId = _environmentUrl,
+                    ConnectionId = _environmentUrl.AbsoluteUri,
                     SourceSolutions = config.SourceSolutions,
                     TargetSolutions = config.TargetSolutions,
-                    ComponentTypes = config.ComponentTypes ?? new List<int>(),
+                    IncludeComponentTypes = config.ComponentTypes ?? new List<string>(),
                     PayloadMode = "lazy"
                 };
 
@@ -146,8 +148,9 @@ public class ReportExecutor
                         var reportResult = await ExecuteReportViaPlugin(
                             plugin, 
                             report, 
-                            _environmentUrl, 
-                            cancellationToken);
+                            _environmentUrl.AbsoluteUri, 
+                            cancellationToken
+                        );
 
                         // Accumulate findings
                         switch (report.Severity)
@@ -203,7 +206,8 @@ public class ReportExecutor
         SolutionLayerAnalyzerPlugin plugin,
         ConfigReport report,
         string connectionId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken
+    )
     {
         // Create a temporary saved report to execute
         var saveRequest = new SaveReportRequest
@@ -287,35 +291,37 @@ public class ReportExecutor
         };
 
         string content;
-        if (_format.ToLowerInvariant() == "json")
+        var lowerInvariant = _format.ToUpperInvariant();
+        switch (lowerInvariant)
         {
-            content = JsonSerializer.Serialize(output, new JsonSerializerOptions
+            case "JSON":
+                content = JsonSerializer.Serialize(output, new JsonSerializerOptions
+                {
+                    WriteIndented = true,
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                });
+                break;
+            case "CSV":
             {
-                WriteIndented = true,
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-            });
-        }
-        else if (_format.ToLowerInvariant() == "csv")
-        {
-            // Simple CSV output
-            var lines = new List<string>
-            {
-                "ComponentId,ComponentType,ComponentTypeName,LogicalName,DisplayName,Solutions"
-            };
-            
-            foreach (var comp in components)
-            {
-                lines.Add($"{comp.ComponentId},{comp.ComponentType},{comp.ComponentTypeName},{comp.LogicalName},{comp.DisplayName},{string.Join(";", comp.Solutions)}");
+                // Simple CSV output
+                var lines = new List<string>
+                {
+                    "ComponentId,ComponentType,ComponentTypeName,LogicalName,DisplayName,Solutions"
+                };
+                lines.AddRange(components.Select(comp => $"{comp.ComponentId},{comp.ComponentType},{comp.ComponentTypeName},{comp.LogicalName},{comp.DisplayName},{string.Join(";", comp.Solutions)}"));
+
+                content = string.Join(Environment.NewLine, lines);
+                break;
             }
-            
-            content = string.Join(Environment.NewLine, lines);
-        }
-        else // YAML
-        {
-            var serializer = new SerializerBuilder()
-                .WithNamingConvention(CamelCaseNamingConvention.Instance)
-                .Build();
-            content = serializer.Serialize(output);
+            // YAML
+            default:
+            {
+                var serializer = new SerializerBuilder()
+                    .WithNamingConvention(CamelCaseNamingConvention.Instance)
+                    .Build();
+                content = serializer.Serialize(output);
+                break;
+            }
         }
 
         await File.WriteAllTextAsync(outputPath, content, cancellationToken);
@@ -324,7 +330,7 @@ public class ReportExecutor
     private ILogger CreatePluginLogger()
     {
         // Create file-only logger for plugin to sandbox its logs
-        var loggerFactory = LoggerFactory.Create(builder =>
+        using var loggerFactory = LoggerFactory.Create(builder =>
         {
             builder.SetMinimumLevel(LogLevel.Debug);
             builder.AddProvider(new FileLoggerProvider(_pluginLogPath, LogLevel.Debug));
@@ -333,6 +339,7 @@ public class ReportExecutor
         return loggerFactory.CreateLogger("Plugin");
     }
 
+#pragma warning disable CA1303
     private void PrintSummary(int totalReports, int criticalCount, int warningCount, int infoCount, string reportPath)
     {
         Console.WriteLine();
@@ -383,13 +390,14 @@ public class ReportExecutor
         Console.Error.WriteLine("═══════════════════════════════════════════════════════════");
         Console.Error.WriteLine();
     }
+#pragma warning restore CA1303
 
     private int DetermineExitCode(int criticalCount, int warningCount, int infoCount)
     {
         var totalFindings = criticalCount + warningCount + infoCount;
 
         // Check max findings threshold first
-        if (_maxFindings.HasValue && totalFindings > _maxFindings.Value)
+        if (totalFindings > _maxFindings)
         {
             _consoleLogger.LogWarning("Total findings ({Total}) exceeds threshold ({Max})", 
                 totalFindings, _maxFindings.Value);
@@ -397,28 +405,32 @@ public class ReportExecutor
         }
 
         // Check severity-based failure
-        if (!string.IsNullOrEmpty(_failOnSeverity))
+        if (string.IsNullOrEmpty(_failOnSeverity))
         {
-            var failSeverity = _failOnSeverity.ToLowerInvariant();
+            return 0;
+        }
+
+#pragma warning disable CA1308
+        var failSeverity = _failOnSeverity.ToLowerInvariant();
+#pragma warning restore CA1308
             
-            if (failSeverity == "information" && totalFindings > 0)
-            {
-                _consoleLogger.LogWarning("Failing on information severity: {Total} findings", totalFindings);
-                return 1;
-            }
+        if (failSeverity == "information" && totalFindings > 0)
+        {
+            _consoleLogger.LogWarning("Failing on information severity: {Total} findings", totalFindings);
+            return 1;
+        }
             
-            if (failSeverity == "warning" && (warningCount > 0 || criticalCount > 0))
-            {
-                _consoleLogger.LogWarning("Failing on warning severity: {Warning} warnings, {Critical} critical", 
-                    warningCount, criticalCount);
-                return 1;
-            }
+        if (failSeverity == "warning" && (warningCount > 0 || criticalCount > 0))
+        {
+            _consoleLogger.LogWarning("Failing on warning severity: {Warning} warnings, {Critical} critical", 
+                warningCount, criticalCount);
+            return 1;
+        }
             
-            if (failSeverity == "critical" && criticalCount > 0)
-            {
-                _consoleLogger.LogError("Failing on critical severity: {Critical} critical findings", criticalCount);
-                return 1;
-            }
+        if (failSeverity == "critical" && criticalCount > 0)
+        {
+            _consoleLogger.LogError("Failing on critical severity: {Critical} critical findings", criticalCount);
+            return 1;
         }
 
         // No failures - success
@@ -442,10 +454,10 @@ public class ReportExecutor
 
     private static string GetFileExtension(string format)
     {
-        return format.ToLowerInvariant() switch
+        return format.ToUpperInvariant() switch
         {
-            "json" => "json",
-            "csv" => "csv",
+            "JSON" => "json",
+            "CSV" => "csv",
             _ => "yaml"
         };
     }

@@ -28,7 +28,7 @@ internal class CliServiceClientFactory : IServiceClientFactory
         _tenantId = tenantId;
     }
 
-    public ServiceClient GetServiceClient(string connectionId)
+    public ServiceClient GetServiceClient(string? connectionId)
     {
         // Build connection string based on provided auth method
         string connString;

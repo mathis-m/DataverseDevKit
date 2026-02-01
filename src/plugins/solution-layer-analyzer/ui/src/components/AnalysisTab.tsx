@@ -103,6 +103,7 @@ export const AnalysisTab: React.FC<AnalysisTabProps> = ({ onNavigateToDiff }) =>
     setAnalysisState({ groupBy: by }), [setAnalysisState]);
 
   const [fullscreenViz, setFullscreenViz] = useState<boolean>(false);
+  const [showSaveToReport, setShowSaveToReport] = useState<boolean>(false);
 
   const loadComponents = useCallback(async (filter?: FilterNode | null) => {
     console.log('[AnalysisTab] loadComponents called with filter:', JSON.stringify(filter, null, 2));

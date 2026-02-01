@@ -1,9 +1,8 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   makeStyles,
   tokens,
   Card,
-  CardHeader,
   Text,
   Button,
   Input,
@@ -11,29 +10,17 @@ import {
   Option,
   Textarea,
   Badge,
-  Menu,
-  MenuItem,
-  MenuList,
-  MenuPopover,
-  MenuTrigger,
   Divider,
   Dialog,
-  DialogTrigger,
   DialogSurface,
   DialogTitle,
   DialogBody,
   DialogActions,
   DialogContent,
-  Accordion,
-  AccordionItem,
-  AccordionHeader,
-  AccordionPanel,
   Label,
-  Spinner,
 } from '@fluentui/react-components';
 import {
   AddRegular,
-  MoreVerticalRegular,
   ArrowUpRegular,
   ArrowDownRegular,
   DeleteRegular,
@@ -146,7 +133,7 @@ interface ReportConfig {
 
 export const ReportBuilderTab: React.FC = () => {
   const styles = useStyles();
-  const { executeCommand } = usePluginApi();
+  const pluginApi = usePluginApi();
   const availableSolutions = useAppStore((state) => state.availableSolutions);
   const indexConfig = useAppStore((state) => state.indexConfig);
   
@@ -310,9 +297,7 @@ export const ReportBuilderTab: React.FC = () => {
   // Load config from file
   const handleLoadConfig = useCallback(async () => {
     try {
-      const result = await executeCommand('importConfig', {
-        connectionId: 'default',
-      });
+      const result = await pluginApi.loadIndexConfigs({ connectionId: 'default' });
       if (result) {
         // Parse and set the loaded config
         console.log('Loaded config:', result);
@@ -320,50 +305,53 @@ export const ReportBuilderTab: React.FC = () => {
     } catch (error) {
       console.error('Failed to load config:', error);
     }
-  }, [executeCommand]);
+  }, [pluginApi]);
 
   // Save config to file
   const handleSaveConfig = useCallback(async () => {
     try {
-      await executeCommand('exportConfig', {
+      await pluginApi.saveIndexConfig({
+        name: 'report-config',
         connectionId: 'default',
-        config: config,
+        sourceSolutions: config.sourceSolutions,
+        targetSolutions: config.targetSolutions,
+        componentTypes: (config.componentTypes || []).map(String),
+        payloadMode: 'lazy',
       });
     } catch (error) {
       console.error('Failed to save config:', error);
     }
-  }, [executeCommand, config]);
+  }, [pluginApi, config]);
 
   // Run all reports
   const handleRunReports = useCallback(async () => {
     setIsRunning(true);
     try {
-      // Execute reports via CLI-like behavior
-      const results = await executeCommand('generateReportOutput', {
-        connectionId: 'default',
-        format: 'json',
-        verbosity: 'basic',
-      });
-      setReportResults(results);
+      // Execute reports via query
+      const results = await pluginApi.queryComponentsSync(null, 0, 1000, 'default');
+      setReportResults({ components: results });
     } catch (error) {
       console.error('Failed to run reports:', error);
     } finally {
       setIsRunning(false);
     }
-  }, [executeCommand]);
+  }, [pluginApi]);
 
   // Export results
   const handleExportResults = useCallback(async (format: 'yaml' | 'json' | 'csv') => {
     try {
-      await executeCommand('generateReportOutput', {
-        connectionId: 'default',
-        format,
-        verbosity: 'medium',
-      });
+      // Export results by downloading as file
+      const blob = new Blob([JSON.stringify(reportResults, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `report-results.${format}`;
+      a.click();
+      URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Failed to export results:', error);
     }
-  }, [executeCommand]);
+  }, [reportResults]);
 
   return (
     <div className={styles.container}>
@@ -707,8 +695,8 @@ export const ReportBuilderTab: React.FC = () => {
 
                   {showFilterBuilder && (
                     <AdvancedFilterBuilder
-                      filter={currentFilter}
-                      onChange={(newFilter) => {
+                      initialFilter={currentFilter}
+                      onFilterChange={(newFilter: FilterNode | null) => {
                         setCurrentFilter(newFilter);
                         setEditingReport({
                           ...editingReport,
@@ -718,7 +706,7 @@ export const ReportBuilderTab: React.FC = () => {
                           },
                         });
                       }}
-                      availableSolutions={availableSolutions.map(s => s.uniqueName)}
+                      solutions={availableSolutions.map(s => s.uniqueName)}
                     />
                   )}
                 </div>

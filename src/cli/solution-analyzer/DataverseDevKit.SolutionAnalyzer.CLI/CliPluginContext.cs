@@ -29,8 +29,8 @@ internal class CliPluginContext : IPluginContext
     public void EmitEvent(PluginEvent pluginEvent)
     {
         // In CLI mode, we just log events instead of emitting them to a host
-        _logger.LogDebug("Plugin Event: {EventType} - {Message}", 
-            pluginEvent.Type, pluginEvent.Message);
+        _logger.LogDebug("Plugin Event: {EventType} - {Payload}", 
+            pluginEvent.Type, pluginEvent.Payload);
     }
 
     public Task<string?> GetConfigAsync(string key, CancellationToken cancellationToken = default)

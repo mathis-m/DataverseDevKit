@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
   Dialog,
-  DialogTrigger,
   DialogSurface,
   DialogTitle,
   DialogBody,
@@ -42,7 +41,7 @@ export const SaveToReportDialog: React.FC<SaveToReportDialogProps> = ({
   currentFilter,
 }) => {
   const styles = useStyles();
-  const { executeCommand } = usePluginApi();
+  const pluginApi = usePluginApi();
 
   const [mode, setMode] = useState<'new' | 'existing'>('new');
   const [reportName, setReportName] = useState('');
@@ -56,55 +55,39 @@ export const SaveToReportDialog: React.FC<SaveToReportDialogProps> = ({
   useEffect(() => {
     if (open && mode === 'existing') {
       // Load existing reports
-      executeCommand('listReports', { connectionId: 'default' })
-        .then((result) => {
-          if (result && result.reportGroups) {
-            const allReports: any[] = [];
-            result.reportGroups.forEach((group: any) => {
-              group.reports.forEach((report: any) => {
-                allReports.push({
-                  ...report,
-                  groupName: group.name,
-                });
-              });
-            });
-            if (result.ungroupedReports) {
-              allReports.push(...result.ungroupedReports);
-            }
-            setExistingReports(allReports);
+      pluginApi.loadFilterConfigs({ connectionId: 'default' })
+        .then((result: { configs: Array<{ id: string; name: string; groupName?: string }> }) => {
+          if (result && result.configs) {
+            setExistingReports(result.configs.map(c => ({
+              id: c.id,
+              name: c.name,
+              groupName: c.groupName,
+            })));
           }
         })
-        .catch((error) => {
+        .catch((error: Error) => {
           console.error('Failed to load reports:', error);
         });
     }
-  }, [open, mode, executeCommand]);
+  }, [open, mode, pluginApi]);
 
   const handleSave = async () => {
     try {
       if (mode === 'new') {
-        // Create new report
-        await executeCommand('saveReport', {
+        // Create new report using saveFilterConfig
+        await pluginApi.saveFilterConfig({
           connectionId: 'default',
           name: reportName,
-          description,
-          severity,
-          recommendedAction,
-          group,
-          queryJson: JSON.stringify(currentFilter),
+          filter: currentFilter,
         });
       } else {
         // Update existing report
         const report = existingReports.find(r => r.id === selectedReport);
         if (report) {
-          await executeCommand('updateReport', {
+          await pluginApi.saveFilterConfig({
             connectionId: 'default',
-            id: selectedReport,
             name: report.name,
-            description: report.description,
-            severity: report.severity,
-            recommendedAction: report.recommendedAction,
-            queryJson: JSON.stringify(currentFilter),
+            filter: currentFilter,
           });
         }
       }
@@ -207,7 +190,7 @@ export const SaveToReportDialog: React.FC<SaveToReportDialogProps> = ({
                   onOptionSelect={(_, data) => setSelectedReport(data.optionValue as string)}
                 >
                   {existingReports.map((report) => (
-                    <Option key={report.id} value={report.id}>
+                    <Option key={report.id} value={report.id} text={report.name}>
                       {report.groupName ? `${report.groupName} / ` : ''}{report.name}
                     </Option>
                   ))}
