@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 using DataverseDevKit.SolutionAnalyzer.CLI;
 
 // Root command
-var rootCommand = new RootCommand("Dataverse DevKit Solution Layer Analyzer CLI - Enterprise reporting tool for Dataverse solution analysis");
+var rootCommand = new RootCommand("Dataverse DevKit Solution Layer Analyzer CLI - Execute solution integrity reports for CI/CD monitoring");
 
 // Global options
 var configOption = new Option<FileInfo>(
@@ -37,29 +37,34 @@ var environmentUrlOption = new Option<string>(
     aliases: new[] { "--environment-url", "-e" },
     description: "Dataverse environment URL"
 );
+environmentUrlOption.IsRequired = true;
 
 var verbosityOption = new Option<string>(
     aliases: new[] { "--verbosity", "-v" },
     getDefaultValue: () => "normal",
-    description: "Log verbosity level (quiet, minimal, normal, detailed, diagnostic)"
+    description: "Console log verbosity (quiet, minimal, normal, detailed)"
 );
 
 var outputPathOption = new Option<DirectoryInfo>(
     aliases: new[] { "--output", "-o" },
     getDefaultValue: () => new DirectoryInfo("."),
-    description: "Output directory for reports and logs"
+    description: "Output directory for reports and plugin logs"
 );
 
-var reportFormatOption = new Option<string>(
+var formatOption = new Option<string>(
     aliases: new[] { "--format", "-f" },
     getDefaultValue: () => "yaml",
     description: "Report output format (yaml, json, csv)"
 );
 
-var reportVerbosityOption = new Option<string>(
-    aliases: new[] { "--report-verbosity", "-rv" },
-    getDefaultValue: () => "basic",
-    description: "Report detail level (basic, medium, verbose)"
+var failOnSeverityOption = new Option<string>(
+    aliases: new[] { "--fail-on-severity" },
+    description: "Fail pipeline if findings of this severity or higher (critical, warning, information)"
+);
+
+var maxFindingsOption = new Option<int?>(
+    aliases: new[] { "--max-findings" },
+    description: "Maximum number of findings allowed before failing"
 );
 
 // Add global options
@@ -71,73 +76,33 @@ rootCommand.AddOption(tenantIdOption);
 rootCommand.AddOption(environmentUrlOption);
 rootCommand.AddOption(verbosityOption);
 rootCommand.AddOption(outputPathOption);
-rootCommand.AddOption(reportFormatOption);
-rootCommand.AddOption(reportVerbosityOption);
+rootCommand.AddOption(formatOption);
+rootCommand.AddOption(failOnSeverityOption);
+rootCommand.AddOption(maxFindingsOption);
 
-// Index command
-var indexCommand = new Command("index", "Build an index of solutions, components, and their layers");
-indexCommand.SetHandler(async (context) =>
+// Main execution - run all reports
+rootCommand.SetHandler(async (context) =>
 {
     var cli = CreateCli(context);
-    await cli.ExecuteIndexAsync(context.GetCancellationToken());
+    var exitCode = await cli.ExecuteReportsAsync(context.GetCancellationToken());
+    context.ExitCode = exitCode;
 });
-
-// Run command - execute all reports from config
-var runCommand = new Command("run", "Execute all reports defined in the configuration file");
-runCommand.SetHandler(async (context) =>
-{
-    var cli = CreateCli(context);
-    await cli.ExecuteReportsAsync(context.GetCancellationToken());
-});
-
-// Export command - export configuration
-var exportCommand = new Command("export", "Export current report configuration to YAML");
-var exportFileOption = new Option<FileInfo>(
-    aliases: new[] { "--file", "-f" },
-    description: "Output file path for exported configuration"
-);
-exportCommand.AddOption(exportFileOption);
-exportCommand.SetHandler(async (context) =>
-{
-    var cli = CreateCli(context);
-    var exportFile = context.ParseResult.GetValueForOption(exportFileOption);
-    await cli.ExportConfigAsync(exportFile, context.GetCancellationToken());
-});
-
-// Import command - import configuration
-var importCommand = new Command("import", "Import report configuration from YAML");
-var importFileOption = new Option<FileInfo>(
-    aliases: new[] { "--file", "-f" },
-    description: "Input file path for configuration to import"
-);
-importFileOption.IsRequired = true;
-importCommand.AddOption(importFileOption);
-importCommand.SetHandler(async (context) =>
-{
-    var cli = CreateCli(context);
-    var importFile = context.ParseResult.GetValueForOption(importFileOption)!;
-    await cli.ImportConfigAsync(importFile, context.GetCancellationToken());
-});
-
-rootCommand.AddCommand(indexCommand);
-rootCommand.AddCommand(runCommand);
-rootCommand.AddCommand(exportCommand);
-rootCommand.AddCommand(importCommand);
 
 return await rootCommand.InvokeAsync(args);
 
-static SolutionAnalyzerCli CreateCli(InvocationContext context)
+static ReportExecutor CreateCli(InvocationContext context)
 {
     var config = context.ParseResult.GetValueForOption(configOption)!;
     var connectionString = context.ParseResult.GetValueForOption(connectionStringOption);
     var clientId = context.ParseResult.GetValueForOption(clientIdOption);
     var clientSecret = context.ParseResult.GetValueForOption(clientSecretOption);
     var tenantId = context.ParseResult.GetValueForOption(tenantIdOption);
-    var environmentUrl = context.ParseResult.GetValueForOption(environmentUrlOption);
+    var environmentUrl = context.ParseResult.GetValueForOption(environmentUrlOption)!;
     var verbosity = context.ParseResult.GetValueForOption(verbosityOption)!;
     var output = context.ParseResult.GetValueForOption(outputPathOption)!;
-    var reportFormat = context.ParseResult.GetValueForOption(reportFormatOption)!;
-    var reportVerbosity = context.ParseResult.GetValueForOption(reportVerbosityOption)!;
+    var format = context.ParseResult.GetValueForOption(formatOption)!;
+    var failOnSeverity = context.ParseResult.GetValueForOption(failOnSeverityOption);
+    var maxFindings = context.ParseResult.GetValueForOption(maxFindingsOption);
 
     var logLevel = verbosity.ToLowerInvariant() switch
     {
@@ -145,19 +110,19 @@ static SolutionAnalyzerCli CreateCli(InvocationContext context)
         "minimal" => LogLevel.Warning,
         "normal" => LogLevel.Information,
         "detailed" => LogLevel.Debug,
-        "diagnostic" => LogLevel.Trace,
         _ => LogLevel.Information
     };
 
-    return new SolutionAnalyzerCli(
+    return new ReportExecutor(
         config,
+        environmentUrl,
         connectionString,
         clientId,
         clientSecret,
         tenantId,
-        environmentUrl,
         logLevel,
         output,
-        reportFormat,
-        reportVerbosity);
+        format,
+        failOnSeverity,
+        maxFindings);
 }
