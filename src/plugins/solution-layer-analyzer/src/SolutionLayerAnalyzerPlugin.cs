@@ -322,87 +322,21 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             },
             new()
             {
-                Name = "saveReport",
-                Label = "Save Report",
-                Description = "Save a query/filter as a report configuration"
+                Name = "parseReportConfig",
+                Label = "Parse Report Config",
+                Description = "Parse a report configuration from JSON, YAML, or XML content"
             },
             new()
             {
-                Name = "updateReport",
-                Label = "Update Report",
-                Description = "Update an existing report configuration"
+                Name = "serializeReportConfig",
+                Label = "Serialize Report Config",
+                Description = "Serialize a report configuration to JSON, YAML, or XML"
             },
             new()
             {
-                Name = "deleteReport",
-                Label = "Delete Report",
-                Description = "Delete a report"
-            },
-            new()
-            {
-                Name = "duplicateReport",
-                Label = "Duplicate Report",
-                Description = "Create a copy of an existing report"
-            },
-            new()
-            {
-                Name = "listReports",
-                Label = "List Reports",
-                Description = "List all reports organized by groups"
-            },
-            new()
-            {
-                Name = "executeReport",
-                Label = "Execute Report",
-                Description = "Execute a saved report and get results"
-            },
-            new()
-            {
-                Name = "reorderReports",
-                Label = "Reorder Reports",
-                Description = "Reorder reports and change their grouping"
-            },
-            new()
-            {
-                Name = "createReportGroup",
-                Label = "Create Report Group",
-                Description = "Create a new report group"
-            },
-            new()
-            {
-                Name = "updateReportGroup",
-                Label = "Update Report Group",
-                Description = "Update a report group"
-            },
-            new()
-            {
-                Name = "deleteReportGroup",
-                Label = "Delete Report Group",
-                Description = "Delete a report group"
-            },
-            new()
-            {
-                Name = "reorderReportGroups",
-                Label = "Reorder Report Groups",
-                Description = "Reorder report groups"
-            },
-            new()
-            {
-                Name = "exportConfig",
-                Label = "Export Configuration",
-                Description = "Export analyzer configuration to YAML file"
-            },
-            new()
-            {
-                Name = "importConfig",
-                Label = "Import Configuration",
-                Description = "Import analyzer configuration from YAML file"
-            },
-            new()
-            {
-                Name = "generateReportOutput",
-                Label = "Generate Report Output",
-                Description = "Generate detailed report output in YAML or JSON format"
+                Name = "executeReports",
+                Label = "Execute Reports",
+                Description = "Execute reports from an in-memory configuration with event-based progress"
             }
         };
 
@@ -440,20 +374,9 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             "loadIndexConfigs" => await ExecuteLoadIndexConfigsAsync(payload, cancellationToken),
             "saveFilterConfig" => await ExecuteSaveFilterConfigAsync(payload, cancellationToken),
             "loadFilterConfigs" => await ExecuteLoadFilterConfigsAsync(payload, cancellationToken),
-            "saveReport" => await ExecuteSaveReportAsync(payload, cancellationToken),
-            "updateReport" => await ExecuteUpdateReportAsync(payload, cancellationToken),
-            "deleteReport" => await ExecuteDeleteReportAsync(payload, cancellationToken),
-            "duplicateReport" => await ExecuteDuplicateReportAsync(payload, cancellationToken),
-            "listReports" => await ExecuteListReportsAsync(payload, cancellationToken),
-            "executeReport" => await ExecuteExecuteReportAsync(payload, cancellationToken),
-            "reorderReports" => await ExecuteReorderReportsAsync(payload, cancellationToken),
-            "createReportGroup" => await ExecuteCreateReportGroupAsync(payload, cancellationToken),
-            "updateReportGroup" => await ExecuteUpdateReportGroupAsync(payload, cancellationToken),
-            "deleteReportGroup" => await ExecuteDeleteReportGroupAsync(payload, cancellationToken),
-            "reorderReportGroups" => await ExecuteReorderReportGroupsAsync(payload, cancellationToken),
-            "exportConfig" => await ExecuteExportConfigAsync(payload, cancellationToken),
-            "importConfig" => await ExecuteImportConfigAsync(payload, cancellationToken),
-            "generateReportOutput" => await ExecuteGenerateReportOutputAsync(payload, cancellationToken),
+            "parseReportConfig" => ExecuteParseReportConfigAsync(payload),
+            "serializeReportConfig" => ExecuteSerializeReportConfigAsync(payload),
+            "executeReports" => await ExecuteExecuteReportsAsync(payload, cancellationToken),
             _ => throw new ArgumentException($"Unknown command: {commandName}", nameof(commandName))
         };
     }
@@ -874,7 +797,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             ColumnSet = new Microsoft.Xrm.Sdk.Query.ColumnSet("uniquename", "friendlyname", "version", "ismanaged", "publisherid")
         };
 
-        var results = await Task.Run(() => serviceClient.RetrieveMultiple(query), cancellationToken);
+        var results = await serviceClient.RetrieveMultipleAsync(query, cancellationToken);
 
         var solutions = new List<SolutionInfo>();
         foreach (var entity in results.Entities)
@@ -972,214 +895,135 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
         return JsonSerializer.SerializeToElement(analytics, JsonOptions);
     }
 
-    private async Task<JsonElement> ExecuteSaveReportAsync(string payload, CancellationToken cancellationToken)
+    private JsonElement ExecuteParseReportConfigAsync(string payload)
     {
-        var request = JsonSerializer.Deserialize<SaveReportRequest>(payload, JsonOptions)
-            ?? throw new ArgumentException("Invalid saveReport request payload", nameof(payload));
+        var request = JsonSerializer.Deserialize<ParseReportConfigRequest>(payload, JsonOptions)
+            ?? throw new ArgumentException("Invalid parseReportConfig request payload", nameof(payload));
 
-        _context!.Logger.LogInformation("Saving report: {Name}", request.Name);
+        _context!.Logger.LogInformation("Parsing report config");
 
-        await using var dbContext = CreateDbContext(request.ConnectionId);
-        var queryService = new QueryService(dbContext);
-        var reportService = new ReportService(dbContext, _context.Logger, queryService);
-        var response = await reportService.SaveReportAsync(request, cancellationToken);
+        // Use a minimal service instance for parsing (no DB needed)
+        var reportService = new ReportService(null!, _context.Logger, null!);
+        var response = reportService.ParseConfig(request);
 
         return JsonSerializer.SerializeToElement(response, JsonOptions);
     }
 
-    private async Task<JsonElement> ExecuteUpdateReportAsync(string payload, CancellationToken cancellationToken)
+    private JsonElement ExecuteSerializeReportConfigAsync(string payload)
     {
-        var request = JsonSerializer.Deserialize<UpdateReportRequest>(payload, JsonOptions)
-            ?? throw new ArgumentException("Invalid updateReport request payload", nameof(payload));
+        var request = JsonSerializer.Deserialize<SerializeReportConfigRequest>(payload, JsonOptions)
+            ?? throw new ArgumentException("Invalid serializeReportConfig request payload", nameof(payload));
 
-        _context!.Logger.LogInformation("Updating report: {Id}", request.Id);
+        _context!.Logger.LogInformation("Serializing report config to {Format}", request.Format);
 
-        await using var dbContext = CreateDbContext(request.ConnectionId);
-        var queryService = new QueryService(dbContext);
-        var reportService = new ReportService(dbContext, _context.Logger, queryService);
-        var response = await reportService.UpdateReportAsync(request, cancellationToken);
+        // Use a minimal service instance for serialization (no DB needed)
+        var reportService = new ReportService(null!, _context.Logger, null!);
+        var response = reportService.SerializeConfig(request);
 
         return JsonSerializer.SerializeToElement(response, JsonOptions);
     }
 
-    private async Task<JsonElement> ExecuteDeleteReportAsync(string payload, CancellationToken cancellationToken)
+    private async Task<JsonElement> ExecuteExecuteReportsAsync(string payload, CancellationToken cancellationToken)
     {
-        var request = JsonSerializer.Deserialize<DeleteReportRequest>(payload, JsonOptions)
-            ?? throw new ArgumentException("Invalid deleteReport request payload", nameof(payload));
+        var request = JsonSerializer.Deserialize<ExecuteReportsRequest>(payload, JsonOptions)
+            ?? throw new ArgumentException("Invalid executeReports request payload", nameof(payload));
 
-        _context!.Logger.LogInformation("Deleting report: {Id}", request.Id);
+        var operationId = request.OperationId ?? Guid.NewGuid().ToString("N");
 
-        await using var dbContext = CreateDbContext(request.ConnectionId);
-        var queryService = new QueryService(dbContext);
-        var reportService = new ReportService(dbContext, _context.Logger, queryService);
-        await reportService.DeleteReportAsync(request, cancellationToken);
+        _context!.Logger.LogInformation("Starting report execution, operation: {OperationId}", operationId);
 
-        return JsonSerializer.SerializeToElement(new { success = true }, JsonOptions);
+        // Return acknowledgment immediately
+        var ack = new ExecuteReportsAcknowledgment
+        {
+            OperationId = operationId,
+            Started = true
+        };
+
+        // Create new request with operation ID
+        var requestWithOperationId = new ExecuteReportsRequest
+        {
+            OperationId = operationId,
+            ConnectionId = request.ConnectionId,
+            Config = request.Config,
+            Verbosity = request.Verbosity,
+            Format = request.Format,
+            GenerateFile = request.GenerateFile
+        };
+
+        // Start execution in background (fire-and-forget with proper error handling)
+        _ = ExecuteReportsAndEmitEventsAsync(requestWithOperationId, cancellationToken);
+
+        return JsonSerializer.SerializeToElement(ack, JsonOptions);
     }
 
-    private async Task<JsonElement> ExecuteDuplicateReportAsync(string payload, CancellationToken cancellationToken)
+    private async Task ExecuteReportsAndEmitEventsAsync(ExecuteReportsRequest request, CancellationToken cancellationToken)
     {
-        var request = JsonSerializer.Deserialize<DuplicateReportRequest>(payload, JsonOptions)
-            ?? throw new ArgumentException("Invalid duplicateReport request payload", nameof(payload));
+        try
+        {
+            await using var dbContext = CreateDbContext(request.ConnectionId);
+            var queryService = new QueryService(dbContext);
+            var reportService = new ReportService(dbContext, _context!.Logger, queryService);
 
-        _context!.Logger.LogInformation("Duplicating report: {Id}", request.Id);
+            // Create progress handler that emits events
+            var progress = new Progress<ReportProgressEvent>(progressEvent =>
+            {
+                try
+                {
+                    var pluginEvent = new PluginEvent
+                    {
+                        PluginId = PluginId,
+                        Type = "plugin:sla:report-progress",
+                        Payload = JsonSerializer.Serialize(progressEvent, JsonOptions),
+                        Timestamp = DateTimeOffset.UtcNow
+                    };
+                    _context!.EmitEvent(pluginEvent);
+                    _context.Logger.LogDebug("Emitted report progress event: {Phase} {Percent}%", progressEvent.Phase, progressEvent.Percent);
+                }
+                catch (Exception ex)
+                {
+                    _context!.Logger.LogError(ex, "Failed to emit report progress event");
+                }
+            });
 
-        await using var dbContext = CreateDbContext(request.ConnectionId);
-        var queryService = new QueryService(dbContext);
-        var reportService = new ReportService(dbContext, _context.Logger, queryService);
-        var response = await reportService.DuplicateReportAsync(request, cancellationToken);
+            // Execute reports
+            var completionEvent = await reportService.ExecuteReportsFromConfigAsync(request, progress, cancellationToken);
 
-        return JsonSerializer.SerializeToElement(response, JsonOptions);
-    }
+            // Emit completion event
+            var pluginCompletionEvent = new PluginEvent
+            {
+                PluginId = PluginId,
+                Type = "plugin:sla:report-complete",
+                Payload = JsonSerializer.Serialize(completionEvent, JsonOptions),
+                Timestamp = DateTimeOffset.UtcNow
+            };
+            _context!.EmitEvent(pluginCompletionEvent);
+            _context.Logger.LogInformation(
+                "Report execution completed, operation: {OperationId}, reports: {ReportCount}, total findings: {TotalFindings}",
+                request.OperationId,
+                completionEvent.Summary?.TotalReports ?? 0,
+                (completionEvent.Summary?.CriticalFindings ?? 0) + (completionEvent.Summary?.WarningFindings ?? 0) + (completionEvent.Summary?.InformationalFindings ?? 0));
+        }
+        catch (Exception ex)
+        {
+            _context!.Logger.LogError(ex, "Report execution failed, operation: {OperationId}", request.OperationId);
 
-    private async Task<JsonElement> ExecuteListReportsAsync(string payload, CancellationToken cancellationToken)
-    {
-        var request = JsonSerializer.Deserialize<ListReportsRequest>(payload, JsonOptions)
-            ?? throw new ArgumentException("Invalid listReports request payload", nameof(payload));
+            // Emit failure event
+            var failureEvent = new ReportCompletionEvent
+            {
+                OperationId = request.OperationId ?? string.Empty,
+                Success = false,
+                ErrorMessage = ex.Message
+            };
 
-        _context!.Logger.LogInformation("Listing reports");
-
-        await using var dbContext = CreateDbContext(request.ConnectionId);
-        var queryService = new QueryService(dbContext);
-        var reportService = new ReportService(dbContext, _context.Logger, queryService);
-        var response = await reportService.ListReportsAsync(request.ConnectionId, cancellationToken);
-
-        return JsonSerializer.SerializeToElement(response, JsonOptions);
-    }
-
-    private async Task<JsonElement> ExecuteExecuteReportAsync(string payload, CancellationToken cancellationToken)
-    {
-        var request = JsonSerializer.Deserialize<ExecuteReportRequest>(payload, JsonOptions)
-            ?? throw new ArgumentException("Invalid executeReport request payload", nameof(payload));
-
-        _context!.Logger.LogInformation("Executing report: {Id}", request.Id);
-
-        await using var dbContext = CreateDbContext(request.ConnectionId);
-        var queryService = new QueryService(dbContext);
-        var reportService = new ReportService(dbContext, _context.Logger, queryService);
-        var response = await reportService.ExecuteReportAsync(request, cancellationToken);
-
-        return JsonSerializer.SerializeToElement(response, JsonOptions);
-    }
-
-    private async Task<JsonElement> ExecuteReorderReportsAsync(string payload, CancellationToken cancellationToken)
-    {
-        var request = JsonSerializer.Deserialize<ReorderReportsRequest>(payload, JsonOptions)
-            ?? throw new ArgumentException("Invalid reorderReports request payload", nameof(payload));
-
-        _context!.Logger.LogInformation("Reordering reports");
-
-        await using var dbContext = CreateDbContext(request.ConnectionId);
-        var queryService = new QueryService(dbContext);
-        var reportService = new ReportService(dbContext, _context.Logger, queryService);
-        await reportService.ReorderReportsAsync(request, cancellationToken);
-
-        return JsonSerializer.SerializeToElement(new { success = true }, JsonOptions);
-    }
-
-    private async Task<JsonElement> ExecuteCreateReportGroupAsync(string payload, CancellationToken cancellationToken)
-    {
-        var request = JsonSerializer.Deserialize<CreateReportGroupRequest>(payload, JsonOptions)
-            ?? throw new ArgumentException("Invalid createReportGroup request payload", nameof(payload));
-
-        _context!.Logger.LogInformation("Creating report group: {Name}", request.Name);
-
-        await using var dbContext = CreateDbContext(request.ConnectionId);
-        var queryService = new QueryService(dbContext);
-        var reportService = new ReportService(dbContext, _context.Logger, queryService);
-        var response = await reportService.CreateReportGroupAsync(request, cancellationToken);
-
-        return JsonSerializer.SerializeToElement(response, JsonOptions);
-    }
-
-    private async Task<JsonElement> ExecuteUpdateReportGroupAsync(string payload, CancellationToken cancellationToken)
-    {
-        var request = JsonSerializer.Deserialize<UpdateReportGroupRequest>(payload, JsonOptions)
-            ?? throw new ArgumentException("Invalid updateReportGroup request payload", nameof(payload));
-
-        _context!.Logger.LogInformation("Updating report group: {Id}", request.Id);
-
-        await using var dbContext = CreateDbContext(request.ConnectionId);
-        var queryService = new QueryService(dbContext);
-        var reportService = new ReportService(dbContext, _context.Logger, queryService);
-        var response = await reportService.UpdateReportGroupAsync(request, cancellationToken);
-
-        return JsonSerializer.SerializeToElement(response, JsonOptions);
-    }
-
-    private async Task<JsonElement> ExecuteDeleteReportGroupAsync(string payload, CancellationToken cancellationToken)
-    {
-        var request = JsonSerializer.Deserialize<DeleteReportGroupRequest>(payload, JsonOptions)
-            ?? throw new ArgumentException("Invalid deleteReportGroup request payload", nameof(payload));
-
-        _context!.Logger.LogInformation("Deleting report group: {Id}", request.Id);
-
-        await using var dbContext = CreateDbContext(request.ConnectionId);
-        var queryService = new QueryService(dbContext);
-        var reportService = new ReportService(dbContext, _context.Logger, queryService);
-        await reportService.DeleteReportGroupAsync(request, cancellationToken);
-
-        return JsonSerializer.SerializeToElement(new { success = true }, JsonOptions);
-    }
-
-    private async Task<JsonElement> ExecuteReorderReportGroupsAsync(string payload, CancellationToken cancellationToken)
-    {
-        var request = JsonSerializer.Deserialize<ReorderReportGroupsRequest>(payload, JsonOptions)
-            ?? throw new ArgumentException("Invalid reorderReportGroups request payload", nameof(payload));
-
-        _context!.Logger.LogInformation("Reordering report groups");
-
-        await using var dbContext = CreateDbContext(request.ConnectionId);
-        var queryService = new QueryService(dbContext);
-        var reportService = new ReportService(dbContext, _context.Logger, queryService);
-        await reportService.ReorderReportGroupsAsync(request, cancellationToken);
-
-        return JsonSerializer.SerializeToElement(new { success = true }, JsonOptions);
-    }
-
-    private async Task<JsonElement> ExecuteExportConfigAsync(string payload, CancellationToken cancellationToken)
-    {
-        var request = JsonSerializer.Deserialize<ExportConfigRequest>(payload, JsonOptions)
-            ?? throw new ArgumentException("Invalid exportConfig request payload", nameof(payload));
-
-        _context!.Logger.LogInformation("Exporting configuration");
-
-        await using var dbContext = CreateDbContext(request.ConnectionId);
-        var queryService = new QueryService(dbContext);
-        var reportService = new ReportService(dbContext, _context.Logger, queryService);
-        var response = await reportService.ExportConfigAsync(request, cancellationToken);
-
-        return JsonSerializer.SerializeToElement(response, JsonOptions);
-    }
-
-    private async Task<JsonElement> ExecuteImportConfigAsync(string payload, CancellationToken cancellationToken)
-    {
-        var request = JsonSerializer.Deserialize<ImportConfigRequest>(payload, JsonOptions)
-            ?? throw new ArgumentException("Invalid importConfig request payload", nameof(payload));
-
-        _context!.Logger.LogInformation("Importing configuration");
-
-        await using var dbContext = CreateDbContext(request.ConnectionId);
-        var queryService = new QueryService(dbContext);
-        var reportService = new ReportService(dbContext, _context.Logger, queryService);
-        var response = await reportService.ImportConfigAsync(request, cancellationToken);
-
-        return JsonSerializer.SerializeToElement(response, JsonOptions);
-    }
-
-    private async Task<JsonElement> ExecuteGenerateReportOutputAsync(string payload, CancellationToken cancellationToken)
-    {
-        var request = JsonSerializer.Deserialize<GenerateReportOutputRequest>(payload, JsonOptions)
-            ?? throw new ArgumentException("Invalid generateReportOutput request payload", nameof(payload));
-
-        _context!.Logger.LogInformation("Generating report output");
-
-        await using var dbContext = CreateDbContext(request.ConnectionId);
-        var queryService = new QueryService(dbContext);
-        var reportService = new ReportService(dbContext, _context.Logger, queryService);
-        var response = await reportService.GenerateReportOutputAsync(request, cancellationToken);
-
-        return JsonSerializer.SerializeToElement(response, JsonOptions);
+            var pluginEvent = new PluginEvent
+            {
+                PluginId = PluginId,
+                Type = "plugin:sla:report-complete",
+                Payload = JsonSerializer.Serialize(failureEvent, JsonOptions),
+                Timestamp = DateTimeOffset.UtcNow
+            };
+            _context!.EmitEvent(pluginEvent);
+        }
     }
 
     /// <inheritdoc/>

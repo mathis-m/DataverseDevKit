@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   makeStyles,
   tokens,
@@ -18,6 +18,7 @@ import {
   DialogActions,
   DialogContent,
   Label,
+  Spinner,
 } from '@fluentui/react-components';
 import {
   AddRegular,
@@ -30,15 +31,18 @@ import {
   PlayRegular,
   SaveRegular,
   FolderOpenRegular,
-  ArrowExportRegular,
   FilterRegular,
   ArrowSyncRegular,
+  EditRegular,
+  CheckmarkRegular,
   DismissRegular,
 } from '@fluentui/react-icons';
 import { usePluginApi } from '../hooks/usePluginApi';
 import { useAppStore } from '../store/useAppStore';
 import { AdvancedFilterBuilder } from './AdvancedFilterBuilder';
-import { FilterNode } from '../types';
+import { RunReportsDialog } from './RunReportsDialog';
+import { ReportSummaryPanel } from './ReportSummaryPanel';
+import { FilterNode, Report, ReportGroup, ReportSeverity, ReportConfigFormat } from '../types';
 
 const useStyles = makeStyles({
   container: {
@@ -52,6 +56,7 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalM,
     alignItems: 'center',
     paddingBlock: tokens.spacingVerticalM,
+    flexWrap: 'wrap',
   },
   content: {
     display: 'flex',
@@ -67,6 +72,14 @@ const useStyles = makeStyles({
     alignItems: 'center',
     padding: tokens.spacingVerticalM,
     backgroundColor: tokens.colorNeutralBackground3,
+  },
+  groupNameContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  groupNameInput: {
+    minWidth: '200px',
   },
   reportItem: {
     display: 'flex',
@@ -101,64 +114,54 @@ const useStyles = makeStyles({
     padding: tokens.spacingVerticalM,
     marginBottom: tokens.spacingVerticalM,
   },
-  resultsContainer: {
-    marginTop: tokens.spacingVerticalL,
-    padding: tokens.spacingVerticalM,
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderRadius: tokens.borderRadiusMedium,
+  emptyState: {
+    textAlign: 'center',
+    padding: tokens.spacingVerticalXXL,
+    color: tokens.colorNeutralForeground3,
   },
 });
 
-interface Report {
-  name: string;
-  description?: string;
-  severity: 'Information' | 'Warning' | 'Critical';
-  recommendedAction?: string;
-  queryJson: string;
-  displayOrder: number;
-}
-
-interface ReportGroup {
-  name: string;
-  displayOrder: number;
-  reports: Report[];
-}
-
-interface ReportConfig {
-  sourceSolutions: string[];
-  targetSolutions: string[];
-  componentTypes?: number[];
-  reportGroups: ReportGroup[];
-  ungroupedReports: Report[];
-}
+/** Generates a unique ID */
+const generateId = () => `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
 export const ReportBuilderTab: React.FC = () => {
   const styles = useStyles();
   const pluginApi = usePluginApi();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Get state from Zustand store
   const availableSolutions = useAppStore((state) => state.availableSolutions);
   const indexConfig = useAppStore((state) => state.indexConfig);
+  const reportBuilderState = useAppStore((state) => state.reportBuilderState);
+  const reportRunState = useAppStore((state) => state.reportRunState);
   const setFilterBarState = useAppStore((state) => state.setFilterBarState);
   const setSelectedTab = useAppStore((state) => state.setSelectedTab);
   
-  const [config, setConfig] = useState<ReportConfig>({
-    sourceSolutions: indexConfig.sourceSolutions || [],
-    targetSolutions: indexConfig.targetSolutions || [],
-    componentTypes: [],
-    reportGroups: [],
-    ungroupedReports: [],
-  });
+  // Report builder actions from Zustand
+  const addReportGroup = useAppStore((state) => state.addReportGroup);
+  const updateReportGroup = useAppStore((state) => state.updateReportGroup);
+  const deleteReportGroup = useAppStore((state) => state.deleteReportGroup);
+  const addReport = useAppStore((state) => state.addReport);
+  const updateReport = useAppStore((state) => state.updateReport);
+  const deleteReport = useAppStore((state) => state.deleteReport);
+  const reorderReportGroups = useAppStore((state) => state.reorderReportGroups);
+  const reorderReports = useAppStore((state) => state.reorderReports);
+  const setReportBuilderState = useAppStore((state) => state.setReportBuilderState);
 
+  // Local UI state
   const [editingReport, setEditingReport] = useState<{
-    groupIndex: number | null;
-    reportIndex: number;
+    groupId: string | null;
     report: Report;
   } | null>(null);
-
   const [showFilterBuilder, setShowFilterBuilder] = useState(false);
   const [currentFilter, setCurrentFilter] = useState<FilterNode | null>(null);
-  const [reportResults, setReportResults] = useState<any>(null);
-  const [isRunning, setIsRunning] = useState(false);
-  const [verbosity, setVerbosity] = useState<'Basic' | 'Medium' | 'Verbose'>('Basic');
+  const [showRunDialog, setShowRunDialog] = useState(false);
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  const [editingGroupName, setEditingGroupName] = useState('');
+  const [saveFormat, setSaveFormat] = useState<ReportConfigFormat>('yaml');
+  const [isSaving, setIsSaving] = useState(false);
+
+  const { reportGroups, ungroupedReports } = reportBuilderState;
 
   // Execute filter - navigate to Analysis tab with the report's filter
   const handleExecuteFilter = useCallback((report: Report) => {
@@ -177,213 +180,208 @@ export const ReportBuilderTab: React.FC = () => {
   // Add new group
   const handleAddGroup = useCallback(() => {
     const newGroup: ReportGroup = {
-      name: `New Group ${config.reportGroups.length + 1}`,
-      displayOrder: config.reportGroups.length,
+      id: generateId(),
+      name: `New Group ${reportGroups.length + 1}`,
+      displayOrder: reportGroups.length,
       reports: [],
     };
-    setConfig((prev) => ({
-      ...prev,
-      reportGroups: [...prev.reportGroups, newGroup],
-    }));
-  }, [config.reportGroups.length]);
+    addReportGroup(newGroup);
+  }, [reportGroups.length, addReportGroup]);
+
+  // Start editing group name
+  const handleStartEditGroupName = useCallback((group: ReportGroup) => {
+    setEditingGroupId(group.id);
+    setEditingGroupName(group.name);
+  }, []);
+
+  // Save group name
+  const handleSaveGroupName = useCallback(() => {
+    if (editingGroupId && editingGroupName.trim()) {
+      updateReportGroup(editingGroupId, { name: editingGroupName.trim() });
+    }
+    setEditingGroupId(null);
+    setEditingGroupName('');
+  }, [editingGroupId, editingGroupName, updateReportGroup]);
+
+  // Cancel editing group name
+  const handleCancelEditGroupName = useCallback(() => {
+    setEditingGroupId(null);
+    setEditingGroupName('');
+  }, []);
 
   // Add new report
-  const handleAddReport = useCallback((groupIndex: number | null) => {
+  const handleAddReport = useCallback((groupId: string | null) => {
     const newReport: Report = {
+      id: generateId(),
       name: 'New Report',
       severity: 'Information',
       queryJson: JSON.stringify(null),
-      displayOrder: groupIndex !== null 
-        ? config.reportGroups[groupIndex].reports.length
-        : config.ungroupedReports.length,
+      displayOrder: groupId 
+        ? (reportGroups.find(g => g.id === groupId)?.reports.length || 0)
+        : ungroupedReports.length,
     };
 
-    if (groupIndex !== null) {
-      setConfig((prev) => {
-        const newGroups = [...prev.reportGroups];
-        newGroups[groupIndex].reports.push(newReport);
-        return { ...prev, reportGroups: newGroups };
-      });
-    } else {
-      setConfig((prev) => ({
-        ...prev,
-        ungroupedReports: [...prev.ungroupedReports, newReport],
-      }));
-    }
-
+    addReport(newReport, groupId || undefined);
+    
     setEditingReport({
-      groupIndex,
-      reportIndex: groupIndex !== null 
-        ? config.reportGroups[groupIndex].reports.length 
-        : config.ungroupedReports.length,
+      groupId,
       report: newReport,
     });
-  }, [config]);
+  }, [reportGroups, ungroupedReports.length, addReport]);
 
   // Move group up/down
-  const handleMoveGroup = useCallback((index: number, direction: 'up' | 'down') => {
-    const newGroups = [...config.reportGroups];
-    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+  const handleMoveGroup = useCallback((groupId: string, direction: 'up' | 'down') => {
+    const currentIndex = reportGroups.findIndex(g => g.id === groupId);
+    if (currentIndex === -1) return;
     
-    if (targetIndex >= 0 && targetIndex < newGroups.length) {
-      [newGroups[index], newGroups[targetIndex]] = [newGroups[targetIndex], newGroups[index]];
-      newGroups.forEach((group, i) => {
-        group.displayOrder = i;
-      });
-      setConfig((prev) => ({ ...prev, reportGroups: newGroups }));
-    }
-  }, [config.reportGroups]);
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= reportGroups.length) return;
+    
+    const newOrder = [...reportGroups.map(g => g.id)];
+    [newOrder[currentIndex], newOrder[targetIndex]] = [newOrder[targetIndex], newOrder[currentIndex]];
+    reorderReportGroups(newOrder);
+  }, [reportGroups, reorderReportGroups]);
 
   // Move report up/down
-  const handleMoveReport = useCallback((groupIndex: number | null, reportIndex: number, direction: 'up' | 'down') => {
-    const targetIndex = direction === 'up' ? reportIndex - 1 : reportIndex + 1;
+  const handleMoveReport = useCallback((groupId: string | null, reportId: string, direction: 'up' | 'down') => {
+    const reports = groupId 
+      ? reportGroups.find(g => g.id === groupId)?.reports || []
+      : ungroupedReports;
     
-    if (groupIndex !== null) {
-      const newGroups = [...config.reportGroups];
-      const reports = [...newGroups[groupIndex].reports];
-      
-      if (targetIndex >= 0 && targetIndex < reports.length) {
-        [reports[reportIndex], reports[targetIndex]] = [reports[targetIndex], reports[reportIndex]];
-        reports.forEach((report, i) => {
-          report.displayOrder = i;
-        });
-        newGroups[groupIndex].reports = reports;
-        setConfig((prev) => ({ ...prev, reportGroups: newGroups }));
-      }
-    } else {
-      const reports = [...config.ungroupedReports];
-      if (targetIndex >= 0 && targetIndex < reports.length) {
-        [reports[reportIndex], reports[targetIndex]] = [reports[targetIndex], reports[reportIndex]];
-        reports.forEach((report, i) => {
-          report.displayOrder = i;
-        });
-        setConfig((prev) => ({ ...prev, ungroupedReports: reports }));
-      }
-    }
-  }, [config]);
+    const currentIndex = reports.findIndex(r => r.id === reportId);
+    if (currentIndex === -1) return;
+    
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= reports.length) return;
+    
+    const newOrder = [...reports.map(r => r.id)];
+    [newOrder[currentIndex], newOrder[targetIndex]] = [newOrder[targetIndex], newOrder[currentIndex]];
+    reorderReports(groupId, newOrder);
+  }, [reportGroups, ungroupedReports, reorderReports]);
 
   // Delete group
-  const handleDeleteGroup = useCallback((index: number) => {
-    setConfig((prev) => ({
-      ...prev,
-      reportGroups: prev.reportGroups.filter((_, i) => i !== index),
-    }));
-  }, []);
+  const handleDeleteGroup = useCallback((groupId: string) => {
+    deleteReportGroup(groupId);
+  }, [deleteReportGroup]);
 
   // Delete report
-  const handleDeleteReport = useCallback((groupIndex: number | null, reportIndex: number) => {
-    if (groupIndex !== null) {
-      setConfig((prev) => {
-        const newGroups = [...prev.reportGroups];
-        newGroups[groupIndex].reports = newGroups[groupIndex].reports.filter((_, i) => i !== reportIndex);
-        return { ...prev, reportGroups: newGroups };
-      });
-    } else {
-      setConfig((prev) => ({
-        ...prev,
-        ungroupedReports: prev.ungroupedReports.filter((_, i) => i !== reportIndex),
-      }));
-    }
-  }, []);
+  const handleDeleteReport = useCallback((groupId: string | null, reportId: string) => {
+    deleteReport(reportId, groupId || undefined);
+  }, [deleteReport]);
 
   // Duplicate report
-  const handleDuplicateReport = useCallback((groupIndex: number | null, reportIndex: number) => {
-    const report = groupIndex !== null 
-      ? config.reportGroups[groupIndex].reports[reportIndex]
-      : config.ungroupedReports[reportIndex];
-    
-    const duplicated = {
+  const handleDuplicateReport = useCallback((groupId: string | null, report: Report) => {
+    const duplicated: Report = {
       ...report,
+      id: generateId(),
       name: `${report.name} (Copy)`,
     };
-
-    if (groupIndex !== null) {
-      setConfig((prev) => {
-        const newGroups = [...prev.reportGroups];
-        newGroups[groupIndex].reports.splice(reportIndex + 1, 0, duplicated);
-        return { ...prev, reportGroups: newGroups };
-      });
-    } else {
-      setConfig((prev) => {
-        const newReports = [...prev.ungroupedReports];
-        newReports.splice(reportIndex + 1, 0, duplicated);
-        return { ...prev, ungroupedReports: newReports };
-      });
-    }
-  }, [config]);
+    addReport(duplicated, groupId || undefined);
+  }, [addReport]);
 
   // Load config from file
-  const handleLoadConfig = useCallback(async () => {
+  const handleLoadConfig = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileSelected = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    
     try {
-      const result = await pluginApi.loadIndexConfigs({ connectionId: 'default' });
-      if (result) {
-        // Parse and set the loaded config
-        console.log('Loaded config:', result);
+      const content = await file.text();
+      const format = file.name.endsWith('.json') ? 'json' 
+        : file.name.endsWith('.xml') ? 'xml' 
+        : 'yaml';
+      
+      const result = await pluginApi.parseReportConfig(content, format);
+      
+      if (result.config) {
+        setReportBuilderState({
+          reportGroups: result.config.reportGroups || [],
+          ungroupedReports: result.config.ungroupedReports || [],
+        });
+      }
+      
+      if (result.warnings?.length) {
+        console.warn('Config load warnings:', result.warnings);
       }
     } catch (error) {
       console.error('Failed to load config:', error);
     }
-  }, [pluginApi]);
+    
+    // Reset file input
+    event.target.value = '';
+  }, [pluginApi, setReportBuilderState]);
 
   // Save config to file
   const handleSaveConfig = useCallback(async () => {
+    setIsSaving(true);
     try {
-      await pluginApi.saveIndexConfig({
-        name: 'report-config',
-        connectionId: 'default',
-        sourceSolutions: config.sourceSolutions,
-        targetSolutions: config.targetSolutions,
-        componentTypes: (config.componentTypes || []).map(String),
-        payloadMode: 'lazy',
-      });
-    } catch (error) {
-      console.error('Failed to save config:', error);
-    }
-  }, [pluginApi, config]);
-
-  // Run all reports
-  const handleRunReports = useCallback(async () => {
-    setIsRunning(true);
-    try {
-      const result = await pluginApi.executeCommand('generateReportOutput', {
-        connectionId: 'default',
-        format: 'Json',
-        verbosity: verbosity,
-      });
-      setReportResults(result);
-    } catch (error) {
-      console.error('Failed to run reports:', error);
-    } finally {
-      setIsRunning(false);
-    }
-  }, [pluginApi, verbosity]);
-
-  // Export results
-  const handleExportResults = useCallback(async (format: 'yaml' | 'json' | 'csv') => {
-    try {
-      const formatMap = { yaml: 'Yaml', json: 'Json', csv: 'Csv' };
-      const result = await pluginApi.executeCommand('generateReportOutput', {
-        connectionId: 'default',
-        format: formatMap[format],
-        verbosity: verbosity,
-      });
+      const config = {
+        sourceSolutions: indexConfig.sourceSolutions || [],
+        targetSolutions: indexConfig.targetSolutions || [],
+        componentTypes: [],
+        reportGroups,
+        ungroupedReports,
+      };
       
-      const content = result.outputContent || JSON.stringify(result, null, 2);
-      const mimeTypes = { yaml: 'application/x-yaml', json: 'application/json', csv: 'text/csv' };
-      const blob = new Blob([content], { type: mimeTypes[format] });
+      const result = await pluginApi.serializeReportConfig(config, saveFormat);
+      
+      const mimeTypes: Record<ReportConfigFormat, string> = {
+        json: 'application/json',
+        yaml: 'application/x-yaml',
+        xml: 'application/xml',
+      };
+      
+      const blob = new Blob([result.content], { type: mimeTypes[saveFormat] });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `report-results.${format}`;
+      a.download = `report-config.${saveFormat}`;
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (error) {
-      console.error('Failed to export results:', error);
+      console.error('Failed to save config:', error);
+    } finally {
+      setIsSaving(false);
     }
-  }, [pluginApi, verbosity]);
+  }, [pluginApi, indexConfig, reportGroups, ungroupedReports, saveFormat]);
+
+  // Save edited report
+  const handleSaveReport = useCallback(() => {
+    if (!editingReport) return;
+    
+    updateReport(editingReport.report.id, editingReport.report, editingReport.groupId || undefined);
+    setEditingReport(null);
+  }, [editingReport, updateReport]);
+
+  const getSeverityColor = (severity: ReportSeverity): 'danger' | 'warning' | 'informative' => {
+    switch (severity) {
+      case 'Critical': return 'danger';
+      case 'Warning': return 'warning';
+      default: return 'informative';
+    }
+  };
+
+  const totalReports = reportGroups.reduce((sum, g) => sum + g.reports.length, ungroupedReports.length);
 
   return (
     <div className={styles.container}>
+      {/* Hidden file input for loading configs */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".yaml,.yml,.json,.xml"
+        style={{ display: 'none' }}
+        onChange={handleFileSelected}
+      />
+      
+      {/* Report Summary Panel (shown when results exist) */}
+      <ReportSummaryPanel />
+      
       {/* Toolbar */}
       <div className={styles.toolbar}>
         <Button
@@ -406,105 +404,124 @@ export const ReportBuilderTab: React.FC = () => {
         >
           Load Config
         </Button>
+        <Dropdown
+          value={saveFormat}
+          onOptionSelect={(_, d) => setSaveFormat(d.optionValue as ReportConfigFormat)}
+          style={{ minWidth: '80px' }}
+        >
+          <Option value="yaml">YAML</Option>
+          <Option value="json">JSON</Option>
+          <Option value="xml">XML</Option>
+        </Dropdown>
         <Button
-          icon={<SaveRegular />}
+          icon={isSaving ? <Spinner size="tiny" /> : <SaveRegular />}
           onClick={handleSaveConfig}
+          disabled={isSaving}
         >
           Save Config
         </Button>
         <Divider vertical />
-        <Text>Verbosity:</Text>
-        <Dropdown
-          value={verbosity}
-          onOptionSelect={(_, d) => setVerbosity(d.optionValue as any)}
-        >
-          <Option value="Basic">Basic</Option>
-          <Option value="Medium">Medium</Option>
-          <Option value="Verbose">Verbose</Option>
-        </Dropdown>
         <Button
           icon={<PlayRegular />}
           appearance="primary"
-          onClick={handleRunReports}
-          disabled={isRunning}
+          onClick={() => setShowRunDialog(true)}
+          disabled={reportRunState.isRunning || totalReports === 0}
         >
-          {isRunning ? 'Running...' : 'Run All Reports'}
+          {reportRunState.isRunning ? 'Running...' : 'Run Reports'}
         </Button>
-        {reportResults && (
-          <>
-            <Button
-              icon={<ArrowExportRegular />}
-              onClick={() => handleExportResults('yaml')}
-            >
-              Export YAML
-            </Button>
-            <Button
-              icon={<ArrowExportRegular />}
-              onClick={() => handleExportResults('json')}
-            >
-              Export JSON
-            </Button>
-            <Button
-              icon={<ArrowExportRegular />}
-              onClick={() => handleExportResults('csv')}
-            >
-              Export CSV
-            </Button>
-          </>
-        )}
       </div>
 
       {/* Content */}
       <div className={styles.content}>
+        {/* Empty state */}
+        {reportGroups.length === 0 && ungroupedReports.length === 0 && (
+          <div className={styles.emptyState}>
+            <Text size={400}>No reports configured</Text>
+            <Text size={300} style={{ display: 'block', marginTop: tokens.spacingVerticalS }}>
+              Add a group or ungrouped report to get started, or load a configuration file.
+            </Text>
+          </div>
+        )}
+        
         {/* Report Groups */}
-        {config.reportGroups.map((group, groupIndex) => (
-          <Card key={groupIndex} className={styles.groupCard}>
+        {reportGroups.map((group, groupIndex) => (
+          <Card key={group.id} className={styles.groupCard}>
             <div className={styles.groupHeader}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM }}>
+              <div className={styles.groupNameContainer}>
                 <FolderRegular />
-                <Text weight="semibold">{group.name}</Text>
+                {editingGroupId === group.id ? (
+                  <>
+                    <Input
+                      className={styles.groupNameInput}
+                      value={editingGroupName}
+                      onChange={(_, d) => setEditingGroupName(d.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveGroupName();
+                        if (e.key === 'Escape') handleCancelEditGroupName();
+                      }}
+                      autoFocus
+                    />
+                    <Button
+                      size="small"
+                      icon={<CheckmarkRegular />}
+                      appearance="subtle"
+                      onClick={handleSaveGroupName}
+                    />
+                    <Button
+                      size="small"
+                      icon={<DismissRegular />}
+                      appearance="subtle"
+                      onClick={handleCancelEditGroupName}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <Text weight="semibold">{group.name}</Text>
+                    <Button
+                      size="small"
+                      icon={<EditRegular />}
+                      appearance="subtle"
+                      onClick={() => handleStartEditGroupName(group)}
+                      title="Rename group"
+                    />
+                  </>
+                )}
                 <Badge>{group.reports.length} reports</Badge>
               </div>
               <div style={{ display: 'flex', gap: tokens.spacingHorizontalS }}>
                 <Button
                   size="small"
                   icon={<ArrowUpRegular />}
-                  onClick={() => handleMoveGroup(groupIndex, 'up')}
+                  onClick={() => handleMoveGroup(group.id, 'up')}
                   disabled={groupIndex === 0}
                 />
                 <Button
                   size="small"
                   icon={<ArrowDownRegular />}
-                  onClick={() => handleMoveGroup(groupIndex, 'down')}
-                  disabled={groupIndex === config.reportGroups.length - 1}
+                  onClick={() => handleMoveGroup(group.id, 'down')}
+                  disabled={groupIndex === reportGroups.length - 1}
                 />
                 <Button
                   size="small"
                   icon={<AddRegular />}
-                  onClick={() => handleAddReport(groupIndex)}
+                  onClick={() => handleAddReport(group.id)}
                 />
                 <Button
                   size="small"
                   icon={<DeleteRegular />}
-                  onClick={() => handleDeleteGroup(groupIndex)}
+                  onClick={() => handleDeleteGroup(group.id)}
                 />
               </div>
             </div>
 
             {/* Reports in group */}
             {group.reports.map((report, reportIndex) => (
-              <div key={reportIndex} className={styles.reportItem}>
+              <div key={report.id} className={styles.reportItem}>
                 <div className={styles.reportInfo}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
                     <DocumentRegular />
                     <Text weight="semibold">{report.name}</Text>
-                    <Badge
-                      color={
-                        report.severity === 'Critical' ? 'danger' :
-                        report.severity === 'Warning' ? 'warning' :
-                        'informative'
-                      }
-                    >
+                    <Badge color={getSeverityColor(report.severity)}>
                       {report.severity}
                     </Badge>
                   </div>
@@ -524,61 +541,61 @@ export const ReportBuilderTab: React.FC = () => {
                   <Button
                     size="small"
                     icon={<ArrowUpRegular />}
-                    onClick={() => handleMoveReport(groupIndex, reportIndex, 'up')}
+                    onClick={() => handleMoveReport(group.id, report.id, 'up')}
                     disabled={reportIndex === 0}
                   />
                   <Button
                     size="small"
                     icon={<ArrowDownRegular />}
-                    onClick={() => handleMoveReport(groupIndex, reportIndex, 'down')}
+                    onClick={() => handleMoveReport(group.id, report.id, 'down')}
                     disabled={reportIndex === group.reports.length - 1}
                   />
                   <Button
                     size="small"
                     icon={<CopyRegular />}
-                    onClick={() => handleDuplicateReport(groupIndex, reportIndex)}
+                    onClick={() => handleDuplicateReport(group.id, report)}
                   />
                   <Button
                     size="small"
                     appearance="primary"
-                    onClick={() => setEditingReport({ groupIndex, reportIndex, report })}
+                    onClick={() => setEditingReport({ groupId: group.id, report: { ...report } })}
                   >
                     Edit
                   </Button>
                   <Button
                     size="small"
                     icon={<DeleteRegular />}
-                    onClick={() => handleDeleteReport(groupIndex, reportIndex)}
+                    onClick={() => handleDeleteReport(group.id, report.id)}
                   />
                 </div>
               </div>
             ))}
+            
+            {group.reports.length === 0 && (
+              <div style={{ padding: tokens.spacingVerticalM, textAlign: 'center', color: tokens.colorNeutralForeground3 }}>
+                <Text size={200}>No reports in this group. Click + to add one.</Text>
+              </div>
+            )}
           </Card>
         ))}
 
         {/* Ungrouped Reports */}
-        {config.ungroupedReports.length > 0 && (
+        {ungroupedReports.length > 0 && (
           <Card className={styles.groupCard}>
             <div className={styles.groupHeader}>
               <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM }}>
                 <Text weight="semibold">Ungrouped Reports</Text>
-                <Badge>{config.ungroupedReports.length} reports</Badge>
+                <Badge>{ungroupedReports.length} reports</Badge>
               </div>
             </div>
 
-            {config.ungroupedReports.map((report, reportIndex) => (
-              <div key={reportIndex} className={styles.reportItem}>
+            {ungroupedReports.map((report, reportIndex) => (
+              <div key={report.id} className={styles.reportItem}>
                 <div className={styles.reportInfo}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
                     <DocumentRegular />
                     <Text weight="semibold">{report.name}</Text>
-                    <Badge
-                      color={
-                        report.severity === 'Critical' ? 'danger' :
-                        report.severity === 'Warning' ? 'warning' :
-                        'informative'
-                      }
-                    >
+                    <Badge color={getSeverityColor(report.severity)}>
                       {report.severity}
                     </Badge>
                   </div>
@@ -598,31 +615,31 @@ export const ReportBuilderTab: React.FC = () => {
                   <Button
                     size="small"
                     icon={<ArrowUpRegular />}
-                    onClick={() => handleMoveReport(null, reportIndex, 'up')}
+                    onClick={() => handleMoveReport(null, report.id, 'up')}
                     disabled={reportIndex === 0}
                   />
                   <Button
                     size="small"
                     icon={<ArrowDownRegular />}
-                    onClick={() => handleMoveReport(null, reportIndex, 'down')}
-                    disabled={reportIndex === config.ungroupedReports.length - 1}
+                    onClick={() => handleMoveReport(null, report.id, 'down')}
+                    disabled={reportIndex === ungroupedReports.length - 1}
                   />
                   <Button
                     size="small"
                     icon={<CopyRegular />}
-                    onClick={() => handleDuplicateReport(null, reportIndex)}
+                    onClick={() => handleDuplicateReport(null, report)}
                   />
                   <Button
                     size="small"
                     appearance="primary"
-                    onClick={() => setEditingReport({ groupIndex: null, reportIndex, report })}
+                    onClick={() => setEditingReport({ groupId: null, report: { ...report } })}
                   >
                     Edit
                   </Button>
                   <Button
                     size="small"
                     icon={<DeleteRegular />}
-                    onClick={() => handleDeleteReport(null, reportIndex)}
+                    onClick={() => handleDeleteReport(null, report.id)}
                   />
                 </div>
               </div>
@@ -631,127 +648,11 @@ export const ReportBuilderTab: React.FC = () => {
         )}
       </div>
 
-      {/* Results Display */}
-      {reportResults && (
-        <div className={styles.resultsContainer}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalM }}>
-            <Text weight="semibold" size={500}>Report Results</Text>
-            <Button
-              size="small"
-              icon={<DismissRegular />}
-              onClick={() => setReportResults(null)}
-            >
-              Close
-            </Button>
-          </div>
-          
-          {reportResults.summary && (
-            <Card style={{ marginBottom: tokens.spacingVerticalM, padding: tokens.spacingVerticalM }}>
-              <Text weight="semibold">Summary</Text>
-              <div style={{ display: 'flex', gap: tokens.spacingHorizontalL, marginTop: tokens.spacingVerticalS }}>
-                <div>
-                  <Text size={200}>Total Reports: {reportResults.summary.totalReports}</Text>
-                </div>
-                <div>
-                  <Badge color="danger">Critical: {reportResults.summary.criticalFindings}</Badge>
-                </div>
-                <div>
-                  <Badge color="warning">Warning: {reportResults.summary.warningFindings}</Badge>
-                </div>
-                <div>
-                  <Badge color="informative">Info: {reportResults.summary.informationalFindings}</Badge>
-                </div>
-                <div>
-                  <Text size={200}>Total Components: {reportResults.summary.totalComponents}</Text>
-                </div>
-              </div>
-            </Card>
-          )}
-          
-          {reportResults.reports && reportResults.reports.map((report: any, idx: number) => (
-            <Card key={idx} style={{ marginBottom: tokens.spacingVerticalM }}>
-              <div style={{ padding: tokens.spacingVerticalM }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalS }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
-                    <Text weight="semibold">{report.name}</Text>
-                    <Badge
-                      color={
-                        report.severity === 'Critical' ? 'danger' :
-                        report.severity === 'Warning' ? 'warning' :
-                        'informative'
-                      }
-                    >
-                      {report.severity}
-                    </Badge>
-                    {report.group && <Badge appearance="outline">{report.group}</Badge>}
-                  </div>
-                  <Text size={200}>{report.totalMatches} matches</Text>
-                </div>
-                
-                {report.recommendedAction && (
-                  <Text size={200} style={{ color: tokens.colorNeutralForeground3, marginBottom: tokens.spacingVerticalS }}>
-                    Action: {report.recommendedAction}
-                  </Text>
-                )}
-                
-                {report.components && report.components.length > 0 && (
-                  <div style={{ marginTop: tokens.spacingVerticalM }}>
-                    <Text size={200} weight="semibold">Components ({report.components.length}):</Text>
-                    <div style={{ maxHeight: '200px', overflow: 'auto', marginTop: tokens.spacingVerticalXS }}>
-                      {report.components.map((comp: any, compIdx: number) => (
-                        <div key={compIdx} style={{ 
-                          padding: tokens.spacingVerticalXS,
-                          borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center'
-                        }}>
-                          <div style={{ flex: 1 }}>
-                            <Text size={200}>
-                              {comp.displayName || comp.logicalName || comp.componentId} ({comp.componentTypeName})
-                            </Text>
-                            {comp.solutions && comp.solutions.length > 0 && (
-                              <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
-                                {' '}- Solutions: {comp.solutions.join(', ')}
-                              </Text>
-                            )}
-                            {verbosity !== 'Basic' && comp.layers && comp.layers.length > 0 && (
-                              <div style={{ marginTop: tokens.spacingVerticalXXS }}>
-                                <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
-                                  Layers: {comp.layers.map((l: any) => l.solutionName).join(' → ')}
-                                </Text>
-                                {verbosity === 'Verbose' && comp.layers.some((l: any) => l.changedAttributes?.length > 0) && (
-                                  <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
-                                    {' '}Changed: {comp.layers.flatMap((l: any) => 
-                                      (l.changedAttributes || []).map((a: any) => a.attributeName)
-                                    ).join(', ')}
-                                  </Text>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                          {comp.makePortalUrl && (
-                            <Button
-                              size="small"
-                              appearance="subtle"
-                              as="a"
-                              href={comp.makePortalUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                            >
-                              View in Portal
-                            </Button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
+      {/* Run Reports Dialog */}
+      <RunReportsDialog
+        open={showRunDialog}
+        onClose={() => setShowRunDialog(false)}
+      />
 
       {/* Edit Report Dialog */}
       {editingReport && (
@@ -799,7 +700,7 @@ export const ReportBuilderTab: React.FC = () => {
                     onOptionSelect={(_, data) => {
                       setEditingReport({
                         ...editingReport,
-                        report: { ...editingReport.report, severity: data.optionValue as any },
+                        report: { ...editingReport.report, severity: data.optionValue as ReportSeverity },
                       });
                     }}
                   >
@@ -882,26 +783,7 @@ export const ReportBuilderTab: React.FC = () => {
               </DialogContent>
               <DialogActions>
                 <Button onClick={() => setEditingReport(null)}>Cancel</Button>
-                <Button
-                  appearance="primary"
-                  onClick={() => {
-                    // Save the edited report back to config
-                    if (editingReport.groupIndex !== null) {
-                      setConfig((prev) => {
-                        const newGroups = [...prev.reportGroups];
-                        newGroups[editingReport.groupIndex!].reports[editingReport.reportIndex] = editingReport.report;
-                        return { ...prev, reportGroups: newGroups };
-                      });
-                    } else {
-                      setConfig((prev) => {
-                        const newReports = [...prev.ungroupedReports];
-                        newReports[editingReport.reportIndex] = editingReport.report;
-                        return { ...prev, ungroupedReports: newReports };
-                      });
-                    }
-                    setEditingReport(null);
-                  }}
-                >
+                <Button appearance="primary" onClick={handleSaveReport}>
                   Save
                 </Button>
               </DialogActions>

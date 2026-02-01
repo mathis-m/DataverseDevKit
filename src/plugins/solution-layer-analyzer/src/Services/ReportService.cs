@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Xml.Serialization;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 using Microsoft.EntityFrameworkCore;
@@ -11,536 +12,81 @@ using Ddk.SolutionLayerAnalyzer.Filters;
 namespace Ddk.SolutionLayerAnalyzer.Services;
 
 /// <summary>
-/// Service for managing reports and report groups
+/// Service for managing reports - stateless operations only.
+/// No database persistence - report configurations are managed in the UI.
 /// </summary>
 public class ReportService
 {
-    private readonly AnalyzerDbContext _context;
+    private readonly AnalyzerDbContext? _context;
     private readonly ILogger _logger;
-    private readonly QueryService _queryService;
+    private readonly QueryService? _queryService;
 
-    public ReportService(AnalyzerDbContext context, ILogger logger, QueryService queryService)
+    public ReportService(AnalyzerDbContext? context, ILogger logger, QueryService? queryService)
     {
         _context = context;
         _logger = logger;
         _queryService = queryService;
     }
 
-    /// <summary>
-    /// Save a new report
-    /// </summary>
-    public async Task<ReportDto> SaveReportAsync(SaveReportRequest request, CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation("Saving new report: {Name}", request.Name);
-
-        // Get the next display order
-        var maxOrder = await _context.Reports
-            .Where(r => r.ConnectionId == request.ConnectionId && r.GroupId == request.GroupId)
-            .MaxAsync(r => (int?)r.DisplayOrder, cancellationToken) ?? 0;
-
-        var report = new Report
-        {
-            ConnectionId = request.ConnectionId,
-            Name = request.Name,
-            Description = request.Description,
-            GroupId = request.GroupId,
-            Severity = request.Severity,
-            RecommendedAction = request.RecommendedAction,
-            QueryJson = request.QueryJson,
-            OriginatingIndexHash = request.OriginatingIndexHash,
-            DisplayOrder = maxOrder + 1,
-            CreatedAt = DateTime.UtcNow
-        };
-
-        _context.Reports.Add(report);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        return await GetReportDtoAsync(report.Id, request.ConnectionId, cancellationToken);
-    }
+    // ============================================================================
+    // Stateless Report Operations (UI-centric, no database)
+    // ============================================================================
 
     /// <summary>
-    /// Update an existing report
+    /// Parse a report configuration from file content.
+    /// Supports JSON, YAML, and XML formats.
     /// </summary>
-    public async Task<ReportDto> UpdateReportAsync(UpdateReportRequest request, CancellationToken cancellationToken = default)
+    public ParseReportConfigResponse ParseConfig(ParseReportConfigRequest request)
     {
-        _logger.LogInformation("Updating report: {Id}", request.Id);
-
-        var report = await _context.Reports
-            .FirstOrDefaultAsync(r => r.Id == request.Id && r.ConnectionId == request.ConnectionId, cancellationToken)
-            ?? throw new ArgumentException($"Report {request.Id} not found");
-
-        if (request.Name != null) report.Name = request.Name;
-        if (request.Description != null) report.Description = request.Description;
-        if (request.GroupId.HasValue) report.GroupId = request.GroupId;
-        if (request.Severity.HasValue) report.Severity = request.Severity.Value;
-        if (request.RecommendedAction != null) report.RecommendedAction = request.RecommendedAction;
-        if (request.QueryJson != null) report.QueryJson = request.QueryJson;
+        var response = new ParseReportConfigResponse();
         
-        report.ModifiedAt = DateTime.UtcNow;
-
-        await _context.SaveChangesAsync(cancellationToken);
-
-        return await GetReportDtoAsync(report.Id, request.ConnectionId, cancellationToken);
-    }
-
-    /// <summary>
-    /// Delete a report
-    /// </summary>
-    public async Task DeleteReportAsync(DeleteReportRequest request, CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation("Deleting report: {Id}", request.Id);
-
-        var report = await _context.Reports
-            .FirstOrDefaultAsync(r => r.Id == request.Id && r.ConnectionId == request.ConnectionId, cancellationToken)
-            ?? throw new ArgumentException($"Report {request.Id} not found");
-
-        _context.Reports.Remove(report);
-        await _context.SaveChangesAsync(cancellationToken);
-    }
-
-    /// <summary>
-    /// Duplicate a report
-    /// </summary>
-    public async Task<ReportDto> DuplicateReportAsync(DuplicateReportRequest request, CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation("Duplicating report: {Id}", request.Id);
-
-        var original = await _context.Reports
-            .FirstOrDefaultAsync(r => r.Id == request.Id && r.ConnectionId == request.ConnectionId, cancellationToken)
-            ?? throw new ArgumentException($"Report {request.Id} not found");
-
-        // Get the next display order
-        var maxOrder = await _context.Reports
-            .Where(r => r.ConnectionId == request.ConnectionId && r.GroupId == original.GroupId)
-            .MaxAsync(r => (int?)r.DisplayOrder, cancellationToken) ?? 0;
-
-        var duplicate = new Report
+        try
         {
-            ConnectionId = original.ConnectionId,
-            Name = request.NewName ?? $"{original.Name} (Copy)",
-            Description = original.Description,
-            GroupId = original.GroupId,
-            Severity = original.Severity,
-            RecommendedAction = original.RecommendedAction,
-            QueryJson = original.QueryJson,
-            OriginatingIndexHash = original.OriginatingIndexHash,
-            DisplayOrder = maxOrder + 1,
-            CreatedAt = DateTime.UtcNow
-        };
-
-        _context.Reports.Add(duplicate);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        return await GetReportDtoAsync(duplicate.Id, request.ConnectionId, cancellationToken);
-    }
-
-    /// <summary>
-    /// Reorder reports
-    /// </summary>
-    public async Task ReorderReportsAsync(ReorderReportsRequest request, CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation("Reordering {Count} reports", request.Reports.Count);
-
-        var reportIds = request.Reports.Select(r => r.Id).ToList();
-        var reports = await _context.Reports
-            .Where(r => reportIds.Contains(r.Id) && r.ConnectionId == request.ConnectionId)
-            .ToListAsync(cancellationToken);
-
-        foreach (var orderUpdate in request.Reports)
-        {
-            var report = reports.FirstOrDefault(r => r.Id == orderUpdate.Id);
-            if (report != null)
+            var format = request.Format ?? DetectFormat(request.Content);
+            
+            response.Config = format switch
             {
-                report.DisplayOrder = orderUpdate.DisplayOrder;
-                if (orderUpdate.GroupId != report.GroupId)
-                {
-                    report.GroupId = orderUpdate.GroupId;
-                }
-                report.ModifiedAt = DateTime.UtcNow;
-            }
-        }
-
-        await _context.SaveChangesAsync(cancellationToken);
-    }
-
-    /// <summary>
-    /// Execute a saved report
-    /// </summary>
-    public async Task<ExecuteReportResponse> ExecuteReportAsync(ExecuteReportRequest request, CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation("Executing report: {Id}", request.Id);
-
-        var report = await _context.Reports
-            .FirstOrDefaultAsync(r => r.Id == request.Id && r.ConnectionId == request.ConnectionId, cancellationToken)
-            ?? throw new ArgumentException($"Report {request.Id} not found");
-
-        // Deserialize the filter query
-        var filterNode = JsonSerializer.Deserialize<FilterNode>(report.QueryJson);
-        if (filterNode == null)
-        {
-            throw new InvalidOperationException("Invalid query JSON in report");
-        }
-
-        // Execute the query using QueryService
-        var queryRequest = new QueryRequest
-        {
-            Filters = filterNode
-        };
-
-        var queryResponse = await _queryService.QueryAsync(queryRequest, cancellationToken);
-
-        // Map to component results
-        var componentResults = queryResponse.Rows.Select(c =>
-        {
-            // Map component type string to code
-            var typeCode = c.ComponentType switch
-            {
-                "Entity" => ComponentTypeCodes.Entity,
-                "Attribute" => ComponentTypeCodes.Attribute,
-                "SystemForm" => ComponentTypeCodes.SystemForm,
-                "SavedQuery" => ComponentTypeCodes.SavedQuery,
-                "SavedQueryVisualization" => ComponentTypeCodes.SavedQueryVisualization,
-                "RibbonCustomization" => ComponentTypeCodes.RibbonCustomization,
-                "WebResource" => ComponentTypeCodes.WebResource,
-                "SDKMessageProcessingStep" => ComponentTypeCodes.SDKMessageProcessingStep,
-                "Workflow" => ComponentTypeCodes.Workflow,
-                "AppModule" => ComponentTypeCodes.AppModule,
-                "SiteMap" => ComponentTypeCodes.SiteMap,
-                "OptionSet" => ComponentTypeCodes.OptionSet,
-                _ => 0
+                ReportConfigFormat.Json => ParseJsonConfig(request.Content),
+                ReportConfigFormat.Yaml => ParseYamlConfig(request.Content),
+                ReportConfigFormat.Xml => ParseXmlConfig(request.Content),
+                _ => throw new ArgumentException($"Unsupported format: {format}")
             };
-
-            return new ReportComponentResult
-            {
-                ComponentId = c.ComponentId.ToString(),
-                ComponentType = typeCode,
-                ComponentTypeName = c.ComponentType,
-                LogicalName = c.LogicalName,
-                DisplayName = c.DisplayName,
-                Solutions = c.LayerSequence
-            };
-        }).ToList();
-
-        // Update last executed timestamp
-        report.LastExecutedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync(cancellationToken);
-
-        return new ExecuteReportResponse
+        }
+        catch (Exception ex)
         {
-            ReportId = report.Id,
-            ReportName = report.Name,
-            Severity = report.Severity,
-            TotalMatches = componentResults.Count,
-            Components = componentResults,
-            ExecutedAt = DateTime.UtcNow
-        };
-    }
-
-    /// <summary>
-    /// List all reports organized by groups
-    /// </summary>
-    public async Task<ListReportsResponse> ListReportsAsync(string connectionId, CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation("Listing reports for connection: {ConnectionId}", connectionId);
-
-        var groups = await _context.ReportGroups
-            .Where(g => g.ConnectionId == connectionId)
-            .Include(g => g.Reports)
-            .OrderBy(g => g.DisplayOrder)
-            .ToListAsync(cancellationToken);
-
-        var ungroupedReports = await _context.Reports
-            .Where(r => r.ConnectionId == connectionId && r.GroupId == null)
-            .OrderBy(r => r.DisplayOrder)
-            .ToListAsync(cancellationToken);
-
-        var response = new ListReportsResponse
-        {
-            Groups = groups.Select(g => new ReportGroupDto
-            {
-                Id = g.Id,
-                Name = g.Name,
-                DisplayOrder = g.DisplayOrder,
-                CreatedAt = g.CreatedAt,
-                ModifiedAt = g.ModifiedAt,
-                Reports = g.Reports.OrderBy(r => r.DisplayOrder).Select(MapToDto).ToList()
-            }).ToList(),
-            UngroupedReports = ungroupedReports.Select(MapToDto).ToList()
-        };
-
+            _logger.LogError(ex, "Failed to parse report config");
+            response.Errors.Add($"Parse error: {ex.Message}");
+        }
+        
         return response;
     }
 
     /// <summary>
-    /// Create a new report group
+    /// Serialize a report configuration to the specified format.
     /// </summary>
-    public async Task<ReportGroupDto> CreateReportGroupAsync(CreateReportGroupRequest request, CancellationToken cancellationToken = default)
+    public SerializeReportConfigResponse SerializeConfig(SerializeReportConfigRequest request)
     {
-        _logger.LogInformation("Creating report group: {Name}", request.Name);
-
-        var maxOrder = await _context.ReportGroups
-            .Where(g => g.ConnectionId == request.ConnectionId)
-            .MaxAsync(g => (int?)g.DisplayOrder, cancellationToken) ?? 0;
-
-        var group = new ReportGroup
+        var content = request.Format switch
         {
-            ConnectionId = request.ConnectionId,
-            Name = request.Name,
-            DisplayOrder = maxOrder + 1,
-            CreatedAt = DateTime.UtcNow
+            ReportConfigFormat.Json => SerializeJsonConfig(request.Config),
+            ReportConfigFormat.Yaml => SerializeYamlConfig(request.Config),
+            ReportConfigFormat.Xml => SerializeXmlConfig(request.Config),
+            _ => throw new ArgumentException($"Unsupported format: {request.Format}")
         };
-
-        _context.ReportGroups.Add(group);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        return new ReportGroupDto
-        {
-            Id = group.Id,
-            Name = group.Name,
-            DisplayOrder = group.DisplayOrder,
-            CreatedAt = group.CreatedAt,
-            Reports = new List<ReportDto>()
-        };
+        
+        return new SerializeReportConfigResponse { Content = content };
     }
 
     /// <summary>
-    /// Update a report group
+    /// Execute reports from an in-memory configuration.
+    /// This is the stateless version that takes the full config from the request.
     /// </summary>
-    public async Task<ReportGroupDto> UpdateReportGroupAsync(UpdateReportGroupRequest request, CancellationToken cancellationToken = default)
+    public async Task<ReportCompletionEvent> ExecuteReportsFromConfigAsync(
+        ExecuteReportsRequest request,
+        IProgress<ReportProgressEvent>? progress = null,
+        CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Updating report group: {Id}", request.Id);
-
-        var group = await _context.ReportGroups
-            .Include(g => g.Reports)
-            .FirstOrDefaultAsync(g => g.Id == request.Id && g.ConnectionId == request.ConnectionId, cancellationToken)
-            ?? throw new ArgumentException($"Report group {request.Id} not found");
-
-        if (request.Name != null) group.Name = request.Name;
-        group.ModifiedAt = DateTime.UtcNow;
-
-        await _context.SaveChangesAsync(cancellationToken);
-
-        return new ReportGroupDto
-        {
-            Id = group.Id,
-            Name = group.Name,
-            DisplayOrder = group.DisplayOrder,
-            CreatedAt = group.CreatedAt,
-            ModifiedAt = group.ModifiedAt,
-            Reports = group.Reports.OrderBy(r => r.DisplayOrder).Select(MapToDto).ToList()
-        };
-    }
-
-    /// <summary>
-    /// Delete a report group (reports in the group will become ungrouped)
-    /// </summary>
-    public async Task DeleteReportGroupAsync(DeleteReportGroupRequest request, CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation("Deleting report group: {Id}", request.Id);
-
-        var group = await _context.ReportGroups
-            .FirstOrDefaultAsync(g => g.Id == request.Id && g.ConnectionId == request.ConnectionId, cancellationToken)
-            ?? throw new ArgumentException($"Report group {request.Id} not found");
-
-        _context.ReportGroups.Remove(group);
-        await _context.SaveChangesAsync(cancellationToken);
-    }
-
-    /// <summary>
-    /// Reorder report groups
-    /// </summary>
-    public async Task ReorderReportGroupsAsync(ReorderReportGroupsRequest request, CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation("Reordering {Count} report groups", request.Groups.Count);
-
-        var groupIds = request.Groups.Select(g => g.Id).ToList();
-        var groups = await _context.ReportGroups
-            .Where(g => groupIds.Contains(g.Id) && g.ConnectionId == request.ConnectionId)
-            .ToListAsync(cancellationToken);
-
-        foreach (var orderUpdate in request.Groups)
-        {
-            var group = groups.FirstOrDefault(g => g.Id == orderUpdate.Id);
-            if (group != null)
-            {
-                group.DisplayOrder = orderUpdate.DisplayOrder;
-                group.ModifiedAt = DateTime.UtcNow;
-            }
-        }
-
-        await _context.SaveChangesAsync(cancellationToken);
-    }
-
-    /// <summary>
-    /// Export analyzer configuration to YAML
-    /// </summary>
-    public async Task<ExportConfigResponse> ExportConfigAsync(ExportConfigRequest request, CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation("Exporting configuration for connection: {ConnectionId}", request.ConnectionId);
-
-        // Get the saved index config to populate source/target solutions
-        var indexConfig = await _context.SavedIndexConfigs
-            .Where(c => c.ConnectionId == request.ConnectionId)
-            .OrderByDescending(c => c.LastUsedAt ?? c.CreatedAt)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        var groups = await _context.ReportGroups
-            .Where(g => g.ConnectionId == request.ConnectionId)
-            .Include(g => g.Reports)
-            .OrderBy(g => g.DisplayOrder)
-            .ToListAsync(cancellationToken);
-
-        var ungroupedReports = await _context.Reports
-            .Where(r => r.ConnectionId == request.ConnectionId && r.GroupId == null)
-            .OrderBy(r => r.DisplayOrder)
-            .ToListAsync(cancellationToken);
-
-        var config = new AnalyzerConfig
-        {
-            SourceSolutions = indexConfig?.SourceSolutions.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList() ?? new List<string>(),
-            TargetSolutions = indexConfig?.TargetSolutions.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList() ?? new List<string>(),
-            ComponentTypes = indexConfig?.ComponentTypes.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList(),
-            ReportGroups = groups.Select(g => new ConfigReportGroup
-            {
-                Name = g.Name,
-                DisplayOrder = g.DisplayOrder,
-                Reports = g.Reports.OrderBy(r => r.DisplayOrder).Select(MapToConfigReport).ToList()
-            }).ToList(),
-            UngroupedReports = ungroupedReports.Select(MapToConfigReport).ToList()
-        };
-
-        var serializer = new SerializerBuilder()
-            .WithNamingConvention(CamelCaseNamingConvention.Instance)
-            .Build();
-        var yaml = serializer.Serialize(config);
-
-        if (!string.IsNullOrEmpty(request.FilePath))
-        {
-            await File.WriteAllTextAsync(request.FilePath, yaml, cancellationToken);
-        }
-
-        return new ExportConfigResponse
-        {
-            ConfigYaml = yaml,
-            FilePath = request.FilePath
-        };
-    }
-
-    /// <summary>
-    /// Import analyzer configuration from YAML
-    /// </summary>
-    public async Task<ImportConfigResponse> ImportConfigAsync(ImportConfigRequest request, CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation("Importing configuration for connection: {ConnectionId}", request.ConnectionId);
-
-        var yaml = request.ConfigYaml;
-        if (string.IsNullOrEmpty(yaml) && !string.IsNullOrEmpty(request.FilePath))
-        {
-            yaml = await File.ReadAllTextAsync(request.FilePath, cancellationToken);
-        }
-
-        if (string.IsNullOrEmpty(yaml))
-        {
-            throw new ArgumentException("Either ConfigYaml or FilePath must be provided");
-        }
-
-        var deserializer = new DeserializerBuilder()
-            .WithNamingConvention(CamelCaseNamingConvention.Instance)
-            .Build();
-        var config = deserializer.Deserialize<AnalyzerConfig>(yaml);
-
-        var warnings = new List<string>();
-        var groupsImported = 0;
-        var reportsImported = 0;
-
-        // Import report groups
-        var groupIdMap = new Dictionary<string, int>(); // Old name to new ID
-        foreach (var configGroup in config.ReportGroups)
-        {
-            var group = new ReportGroup
-            {
-                ConnectionId = request.ConnectionId,
-                Name = configGroup.Name,
-                DisplayOrder = configGroup.DisplayOrder,
-                CreatedAt = DateTime.UtcNow
-            };
-
-            _context.ReportGroups.Add(group);
-            await _context.SaveChangesAsync(cancellationToken);
-            
-            groupIdMap[configGroup.Name] = group.Id;
-            groupsImported++;
-
-            // Import reports in this group
-            foreach (var configReport in configGroup.Reports)
-            {
-                var report = new Report
-                {
-                    ConnectionId = request.ConnectionId,
-                    Name = configReport.Name,
-                    Description = configReport.Description,
-                    GroupId = group.Id,
-                    Severity = configReport.Severity,
-                    RecommendedAction = configReport.RecommendedAction,
-                    QueryJson = configReport.QueryJson,
-                    DisplayOrder = configReport.DisplayOrder,
-                    CreatedAt = DateTime.UtcNow
-                };
-
-                _context.Reports.Add(report);
-                reportsImported++;
-            }
-        }
-
-        // Import ungrouped reports
-        foreach (var configReport in config.UngroupedReports)
-        {
-            var report = new Report
-            {
-                ConnectionId = request.ConnectionId,
-                Name = configReport.Name,
-                Description = configReport.Description,
-                GroupId = null,
-                Severity = configReport.Severity,
-                RecommendedAction = configReport.RecommendedAction,
-                QueryJson = configReport.QueryJson,
-                DisplayOrder = configReport.DisplayOrder,
-                CreatedAt = DateTime.UtcNow
-            };
-
-            _context.Reports.Add(report);
-            reportsImported++;
-        }
-
-        await _context.SaveChangesAsync(cancellationToken);
-
-        return new ImportConfigResponse
-        {
-            GroupsImported = groupsImported,
-            ReportsImported = reportsImported,
-            Warnings = warnings
-        };
-    }
-
-    /// <summary>
-    /// Generate report output in YAML or JSON format
-    /// </summary>
-    public async Task<GenerateReportOutputResponse> GenerateReportOutputAsync(GenerateReportOutputRequest request, CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation("Generating report output for connection: {ConnectionId}", request.ConnectionId);
-
-        var reportIds = request.ReportId.HasValue 
-            ? new List<int> { request.ReportId.Value }
-            : request.ReportIds ?? new List<int>();
-
-        if (!reportIds.Any())
-        {
-            // Get all reports if none specified
-            reportIds = await _context.Reports
-                .Where(r => r.ConnectionId == request.ConnectionId)
-                .Select(r => r.Id)
-                .ToListAsync(cancellationToken);
-        }
+        _logger.LogInformation("Executing reports from config, operation: {OperationId}", request.OperationId);
 
         var reportResults = new List<ReportExecutionResult>();
         var totalCritical = 0;
@@ -548,105 +94,284 @@ public class ReportService
         var totalInfo = 0;
         var allComponentIds = new HashSet<string>();
 
-        foreach (var reportId in reportIds)
+        // Collect all reports
+        var allReports = new List<(ReportDefinition Report, string? GroupName)>();
+        
+        foreach (var group in request.Config.ReportGroups)
         {
-            var report = await _context.Reports
-                .Include(r => r.Group)
-                .FirstOrDefaultAsync(r => r.Id == reportId && r.ConnectionId == request.ConnectionId, cancellationToken);
-
-            if (report == null) continue;
-
-            // Execute the report
-            var executeRequest = new ExecuteReportRequest
+            foreach (var report in group.Reports)
             {
-                Id = reportId,
-                ConnectionId = request.ConnectionId
-            };
-            var executeResponse = await ExecuteReportAsync(executeRequest, cancellationToken);
-
-            // Map to detailed results based on verbosity
-            var detailedComponents = await MapToDetailedComponentsAsync(
-                executeResponse.Components, 
-                request.Verbosity, 
-                request.ConnectionId,
-                cancellationToken);
-
-            var result = new ReportExecutionResult
-            {
-                Name = report.Name,
-                Group = report.Group?.Name,
-                Severity = report.Severity,
-                RecommendedAction = report.RecommendedAction,
-                TotalMatches = executeResponse.TotalMatches,
-                Components = detailedComponents
-            };
-
-            reportResults.Add(result);
-
-            // Update summary counts
-            foreach (var comp in executeResponse.Components)
-            {
-                allComponentIds.Add(comp.ComponentId);
+                allReports.Add((report, group.Name));
             }
-
-            if (report.Severity == ReportSeverity.Critical)
-                totalCritical += executeResponse.TotalMatches;
-            else if (report.Severity == ReportSeverity.Warning)
-                totalWarning += executeResponse.TotalMatches;
-            else
-                totalInfo += executeResponse.TotalMatches;
+        }
+        
+        foreach (var report in request.Config.UngroupedReports)
+        {
+            allReports.Add((report, null));
         }
 
-        var reportOutput = new ReportOutput
+        var totalReports = allReports.Count;
+        var currentReport = 0;
+
+        // Report starting phase
+        progress?.Report(new ReportProgressEvent
         {
-            GeneratedAt = DateTime.UtcNow,
-            ConnectionId = request.ConnectionId,
-            Verbosity = request.Verbosity,
-            Reports = reportResults,
-            Summary = new ReportSummary
+            OperationId = request.OperationId ?? string.Empty,
+            CurrentReport = 0,
+            TotalReports = totalReports,
+            Phase = "starting",
+            Percent = 0
+        });
+
+        foreach (var (report, groupName) in allReports)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            currentReport++;
+
+            // Report executing phase
+            progress?.Report(new ReportProgressEvent
             {
-                TotalReports = reportResults.Count,
-                CriticalFindings = totalCritical,
-                WarningFindings = totalWarning,
-                InformationalFindings = totalInfo,
-                TotalComponents = allComponentIds.Count
+                OperationId = request.OperationId ?? string.Empty,
+                CurrentReport = currentReport,
+                TotalReports = totalReports,
+                CurrentReportName = report.Name,
+                Phase = "executing",
+                Percent = (int)((currentReport - 1) * 100.0 / totalReports)
+            });
+
+            try
+            {
+                // Parse the filter from queryJson
+                FilterNode? filterNode = null;
+                if (!string.IsNullOrEmpty(report.QueryJson) && report.QueryJson != "null")
+                {
+                    filterNode = JsonSerializer.Deserialize<FilterNode>(report.QueryJson);
+                }
+
+                // Execute the query
+                var queryRequest = new QueryRequest { Filters = filterNode };
+                
+                if (_queryService == null)
+                {
+                    throw new InvalidOperationException("Query service is required for report execution");
+                }
+                
+                var queryResponse = await _queryService.QueryAsync(queryRequest, cancellationToken);
+
+                // Map to component results
+                var componentResults = queryResponse.Rows.Select(c => new ReportComponentResult
+                {
+                    ComponentId = c.ComponentId.ToString(),
+                    ComponentType = MapComponentTypeToCode(c.ComponentType),
+                    ComponentTypeName = c.ComponentType,
+                    LogicalName = c.LogicalName,
+                    DisplayName = c.DisplayName,
+                    Solutions = c.LayerSequence
+                }).ToList();
+
+                // Map to detailed results based on verbosity
+                var detailedComponents = await MapToDetailedComponentsAsync(
+                    componentResults,
+                    request.Verbosity,
+                    request.ConnectionId,
+                    cancellationToken);
+
+                var result = new ReportExecutionResult
+                {
+                    Name = report.Name,
+                    Group = groupName,
+                    Severity = report.Severity,
+                    RecommendedAction = report.RecommendedAction,
+                    TotalMatches = componentResults.Count,
+                    Components = detailedComponents
+                };
+
+                reportResults.Add(result);
+
+                // Update summary counts
+                foreach (var comp in componentResults)
+                {
+                    allComponentIds.Add(comp.ComponentId);
+                }
+
+                if (report.Severity == ReportSeverity.Critical)
+                    totalCritical += componentResults.Count;
+                else if (report.Severity == ReportSeverity.Warning)
+                    totalWarning += componentResults.Count;
+                else
+                    totalInfo += componentResults.Count;
             }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to execute report: {ReportName}", report.Name);
+                // Continue with other reports
+            }
+        }
+
+        var summary = new ReportSummary
+        {
+            TotalReports = reportResults.Count,
+            CriticalFindings = totalCritical,
+            WarningFindings = totalWarning,
+            InformationalFindings = totalInfo,
+            TotalComponents = allComponentIds.Count
         };
 
-        string outputContent;
-        if (request.Format == ReportOutputFormat.Yaml)
+        // Generate output content if requested
+        string? outputContent = null;
+        if (request.GenerateFile && request.Format.HasValue)
         {
-            var serializer = new SerializerBuilder()
-                .WithNamingConvention(CamelCaseNamingConvention.Instance)
-                .Build();
-            outputContent = serializer.Serialize(reportOutput);
-        }
-        else if (request.Format == ReportOutputFormat.Json)
-        {
-            var options = new JsonSerializerOptions
+            progress?.Report(new ReportProgressEvent
             {
-                WriteIndented = true,
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                OperationId = request.OperationId ?? string.Empty,
+                CurrentReport = totalReports,
+                TotalReports = totalReports,
+                Phase = "generating-output",
+                Percent = 95
+            });
+
+            var reportOutput = new ReportOutput
+            {
+                GeneratedAt = DateTime.UtcNow,
+                ConnectionId = request.ConnectionId,
+                Verbosity = request.Verbosity,
+                Reports = reportResults,
+                Summary = summary
             };
-            outputContent = JsonSerializer.Serialize(reportOutput, options);
-        }
-        else // CSV
-        {
-            outputContent = CsvHelper.SerializeReportOutput(reportOutput, request.Verbosity);
+
+            outputContent = request.Format.Value switch
+            {
+                ReportOutputFormat.Yaml => SerializeYamlOutput(reportOutput),
+                ReportOutputFormat.Json => SerializeJsonOutput(reportOutput),
+                ReportOutputFormat.Csv => CsvHelper.SerializeReportOutput(reportOutput, request.Verbosity),
+                _ => SerializeJsonOutput(reportOutput)
+            };
         }
 
-        if (!string.IsNullOrEmpty(request.FilePath))
+        return new ReportCompletionEvent
         {
-            await File.WriteAllTextAsync(request.FilePath, outputContent, cancellationToken);
-        }
-
-        return new GenerateReportOutputResponse
-        {
+            OperationId = request.OperationId ?? string.Empty,
+            Success = true,
+            Summary = summary,
+            Reports = reportResults,
             OutputContent = outputContent,
-            FilePath = request.FilePath,
-            Format = request.Format
+            OutputFormat = request.Format
         };
     }
+
+    // ============================================================================
+    // Private Helpers for Stateless Operations
+    // ============================================================================
+
+    private static ReportConfigFormat DetectFormat(string content)
+    {
+        content = content.TrimStart();
+        
+        if (content.StartsWith('{') || content.StartsWith('['))
+            return ReportConfigFormat.Json;
+        
+        if (content.StartsWith("<?xml") || content.StartsWith("<"))
+            return ReportConfigFormat.Xml;
+        
+        // Default to YAML
+        return ReportConfigFormat.Yaml;
+    }
+
+    private ReportConfigDefinition ParseJsonConfig(string content)
+    {
+        var options = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        };
+        return JsonSerializer.Deserialize<ReportConfigDefinition>(content, options) 
+            ?? new ReportConfigDefinition();
+    }
+
+    private ReportConfigDefinition ParseYamlConfig(string content)
+    {
+        var deserializer = new DeserializerBuilder()
+            .WithNamingConvention(CamelCaseNamingConvention.Instance)
+            .IgnoreUnmatchedProperties()
+            .Build();
+        return deserializer.Deserialize<ReportConfigDefinition>(content) 
+            ?? new ReportConfigDefinition();
+    }
+
+    private ReportConfigDefinition ParseXmlConfig(string content)
+    {
+        var serializer = new XmlSerializer(typeof(ReportConfigDefinition));
+        using var reader = new StringReader(content);
+        return (ReportConfigDefinition?)serializer.Deserialize(reader) 
+            ?? new ReportConfigDefinition();
+    }
+
+    private string SerializeJsonConfig(ReportConfigDefinition config)
+    {
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+        return JsonSerializer.Serialize(config, options);
+    }
+
+    private string SerializeYamlConfig(ReportConfigDefinition config)
+    {
+        var serializer = new SerializerBuilder()
+            .WithNamingConvention(CamelCaseNamingConvention.Instance)
+            .Build();
+        return serializer.Serialize(config);
+    }
+
+    private string SerializeXmlConfig(ReportConfigDefinition config)
+    {
+        var serializer = new XmlSerializer(typeof(ReportConfigDefinition));
+        using var writer = new StringWriter();
+        serializer.Serialize(writer, config);
+        return writer.ToString();
+    }
+
+    private string SerializeJsonOutput(ReportOutput output)
+    {
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+        return JsonSerializer.Serialize(output, options);
+    }
+
+    private string SerializeYamlOutput(ReportOutput output)
+    {
+        var serializer = new SerializerBuilder()
+            .WithNamingConvention(CamelCaseNamingConvention.Instance)
+            .Build();
+        return serializer.Serialize(output);
+    }
+
+    private static int MapComponentTypeToCode(string componentType)
+    {
+        return componentType switch
+        {
+            "Entity" => ComponentTypeCodes.Entity,
+            "Attribute" => ComponentTypeCodes.Attribute,
+            "SystemForm" => ComponentTypeCodes.SystemForm,
+            "SavedQuery" => ComponentTypeCodes.SavedQuery,
+            "SavedQueryVisualization" => ComponentTypeCodes.SavedQueryVisualization,
+            "RibbonCustomization" => ComponentTypeCodes.RibbonCustomization,
+            "WebResource" => ComponentTypeCodes.WebResource,
+            "SDKMessageProcessingStep" => ComponentTypeCodes.SDKMessageProcessingStep,
+            "Workflow" => ComponentTypeCodes.Workflow,
+            "AppModule" => ComponentTypeCodes.AppModule,
+            "SiteMap" => ComponentTypeCodes.SiteMap,
+            "OptionSet" => ComponentTypeCodes.OptionSet,
+            _ => 0
+        };
+    }
+
+    // ============================================================================
+    // Private Helpers (Legacy DB operations)
+    // ============================================================================
 
     private async Task<List<DetailedComponentResult>> MapToDetailedComponentsAsync(
         List<ReportComponentResult> components, 
@@ -654,6 +379,11 @@ public class ReportService
         string connectionId,
         CancellationToken cancellationToken)
     {
+        if (_context == null)
+        {
+            throw new InvalidOperationException("Database context is required for detailed component mapping");
+        }
+
         var results = new List<DetailedComponentResult>();
 
         foreach (var component in components)
@@ -717,48 +447,5 @@ public class ReportService
         // Always link to the layers view for all component types
         // Format: https://make.powerapps.com/environments/<env id>/solutions/fd140aaf-4df4-11dd-bd17-0019b9312238/objects/all/<component id>/layers
         return $"https://make.powerapps.com/environments/{connectionId}/solutions/fd140aaf-4df4-11dd-bd17-0019b9312238/objects/all/{component.ComponentId}/layers";
-    }
-
-    private async Task<ReportDto> GetReportDtoAsync(int reportId, string connectionId, CancellationToken cancellationToken)
-    {
-        var report = await _context.Reports
-            .Include(r => r.Group)
-            .FirstOrDefaultAsync(r => r.Id == reportId && r.ConnectionId == connectionId, cancellationToken)
-            ?? throw new ArgumentException($"Report {reportId} not found");
-
-        return MapToDto(report);
-    }
-
-    private static ReportDto MapToDto(Report report)
-    {
-        return new ReportDto
-        {
-            Id = report.Id,
-            Name = report.Name,
-            Description = report.Description,
-            GroupId = report.GroupId,
-            GroupName = report.Group?.Name,
-            Severity = report.Severity,
-            RecommendedAction = report.RecommendedAction,
-            QueryJson = report.QueryJson,
-            DisplayOrder = report.DisplayOrder,
-            OriginatingIndexHash = report.OriginatingIndexHash,
-            CreatedAt = report.CreatedAt,
-            ModifiedAt = report.ModifiedAt,
-            LastExecutedAt = report.LastExecutedAt
-        };
-    }
-
-    private static ConfigReport MapToConfigReport(Report report)
-    {
-        return new ConfigReport
-        {
-            Name = report.Name,
-            Description = report.Description,
-            Severity = report.Severity,
-            RecommendedAction = report.RecommendedAction,
-            QueryJson = report.QueryJson,
-            DisplayOrder = report.DisplayOrder
-        };
     }
 }

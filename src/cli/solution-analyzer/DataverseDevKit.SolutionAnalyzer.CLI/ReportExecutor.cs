@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using YamlDotNet.Serialization;
@@ -9,7 +10,8 @@ using Ddk.SolutionLayerAnalyzer.DTOs;
 namespace DataverseDevKit.SolutionAnalyzer.CLI;
 
 /// <summary>
-/// Executes reports from configuration for CI/CD monitoring by directly calling the plugin
+/// Executes reports from configuration for CI/CD monitoring by directly calling the plugin.
+/// Uses stateless approach - config file content is sent to plugin for parsing.
 /// </summary>
 public class ReportExecutor
 {
@@ -21,10 +23,17 @@ public class ReportExecutor
     private readonly string? _tenantId;
     private readonly DirectoryInfo _outputDirectory;
     private readonly string _format;
+    private readonly string _verbosity;
     private readonly string? _failOnSeverity;
     private readonly int? _maxFindings;
     private readonly ILogger _consoleLogger;
     private readonly string _pluginLogPath;
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true
+    };
 
     public ReportExecutor(
         FileInfo configFile,
@@ -37,7 +46,8 @@ public class ReportExecutor
         DirectoryInfo outputDirectory,
         string format,
         string? failOnSeverity,
-        int? maxFindings)
+        int? maxFindings,
+        string verbosity = "basic")
     {
         _configFile = configFile;
         _environmentUrl = environmentUrl;
@@ -47,6 +57,7 @@ public class ReportExecutor
         _tenantId = tenantId;
         _outputDirectory = outputDirectory;
         _format = format;
+        _verbosity = verbosity;
         _failOnSeverity = failOnSeverity;
         _maxFindings = maxFindings;
 
@@ -69,7 +80,8 @@ public class ReportExecutor
     }
 
     /// <summary>
-    /// Execute all reports from configuration and return exit code
+    /// Execute all reports from configuration and return exit code.
+    /// Uses stateless approach: reads config file, sends to plugin for parsing, executes reports.
     /// </summary>
     public async Task<int> ExecuteReportsAsync(CancellationToken cancellationToken)
     {
@@ -77,13 +89,9 @@ public class ReportExecutor
         
         try
         {
-            // Load configuration
-            var config = await LoadConfigurationAsync(cancellationToken);
+            // Read config file content as string
+            var configContent = await File.ReadAllTextAsync(_configFile.FullName, cancellationToken);
             
-            var totalReports = config.ReportGroups.Sum(g => g.Reports.Count) + config.UngroupedReports.Count;
-            _consoleLogger.LogInformation("Loaded {ReportCount} reports from {GroupCount} groups", 
-                totalReports, config.ReportGroups.Count);
-
             // Create plugin instance and context
             var plugin = new SolutionLayerAnalyzerPlugin();
             var pluginLogger = CreatePluginLogger();
@@ -106,77 +114,104 @@ public class ReportExecutor
 
             try
             {
-                // First, ensure we have an index
-                _consoleLogger.LogInformation("Checking index status");
+                // Parse config via plugin (stateless)
+                _consoleLogger.LogInformation("Parsing report configuration");
+                var parseRequest = new ParseReportConfigRequest
+                {
+                    Content = configContent,
+                    Format = DetectConfigFormat(_configFile.Name)
+                };
                 
+                var parsePayload = JsonSerializer.Serialize(parseRequest, JsonOptions);
+                var parseResultElement = await plugin.ExecuteAsync("parseReportConfig", parsePayload, cancellationToken);
+                var parseResult = JsonSerializer.Deserialize<ParseReportConfigResponse>(
+                    parseResultElement.GetRawText(), JsonOptions);
+
+                if (parseResult == null || parseResult.Errors.Count > 0)
+                {
+                    foreach (var error in parseResult?.Errors ?? new List<string> { "Unknown parse error" })
+                    {
+                        _consoleLogger.LogError("Config parse error: {Error}", error);
+                    }
+                    return 2;
+                }
+
+                var config = parseResult.Config;
+                var totalReports = config.ReportGroups.Sum(g => g.Reports.Count) + config.UngroupedReports.Count;
+                _consoleLogger.LogInformation("Loaded {ReportCount} reports from {GroupCount} groups", 
+                    totalReports, config.ReportGroups.Count);
+
                 // Build index request from config
+                _consoleLogger.LogInformation("Building index for {SourceCount} sources and {TargetCount} targets",
+                    config.SourceSolutions.Count, config.TargetSolutions.Count);
+                
                 var indexRequest = new IndexRequest
                 {
                     ConnectionId = _environmentUrl.AbsoluteUri,
                     SourceSolutions = config.SourceSolutions,
                     TargetSolutions = config.TargetSolutions,
-                    IncludeComponentTypes = config.ComponentTypes ?? new List<string>(),
+                    IncludeComponentTypes = config.ComponentTypes?.Select(c => c.ToString(CultureInfo.InvariantCulture)).ToList() ?? new List<string>(),
                     PayloadMode = "lazy"
                 };
 
-                var indexPayload = JsonSerializer.Serialize(indexRequest, new JsonSerializerOptions
-                {
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                });
-
-                _consoleLogger.LogInformation("Building index for {SourceCount} sources and {TargetCount} targets",
-                    config.SourceSolutions.Count, config.TargetSolutions.Count);
-                
+                var indexPayload = JsonSerializer.Serialize(indexRequest, JsonOptions);
                 await plugin.ExecuteAsync("index", indexPayload, cancellationToken);
 
-                // Execute all reports and collect results
-                var criticalCount = 0;
-                var warningCount = 0;
-                var infoCount = 0;
-                var allComponents = new List<ReportComponentResult>();
+                // Wait for index completion (poll for completion event or check metadata)
+                _consoleLogger.LogInformation("Waiting for index to complete...");
+                await WaitForIndexCompletionAsync(plugin, _environmentUrl.AbsoluteUri, cancellationToken);
 
-                foreach (var group in config.ReportGroups)
+                // Execute reports via stateless executeReports command
+                _consoleLogger.LogInformation("Executing reports...");
+                var verbosity = ParseVerbosity(_verbosity);
+                var format = ParseOutputFormat(_format);
+                
+                var executeRequest = new ExecuteReportsRequest
                 {
-                    _consoleLogger.LogInformation("Executing group: {GroupName}", group.Name);
-                    
-                    foreach (var report in group.Reports)
-                    {
-                        _consoleLogger.LogDebug("  - {ReportName} (Severity: {Severity})", 
-                            report.Name, report.Severity);
-                        
-                        // Execute report via plugin
-                        var reportResult = await ExecuteReportViaPlugin(
-                            plugin, 
-                            report, 
-                            _environmentUrl.AbsoluteUri, 
-                            cancellationToken
-                        );
+                    OperationId = Guid.NewGuid().ToString("N"),
+                    ConnectionId = _environmentUrl.AbsoluteUri,
+                    Config = config,
+                    Verbosity = verbosity,
+                    Format = format,
+                    GenerateFile = true
+                };
 
-                        // Accumulate findings
-                        switch (report.Severity)
-                        {
-                            case ReportSeverity.Critical:
-                                criticalCount += reportResult.TotalMatches;
-                                break;
-                            case ReportSeverity.Warning:
-                                warningCount += reportResult.TotalMatches;
-                                break;
-                            case ReportSeverity.Information:
-                                infoCount += reportResult.TotalMatches;
-                                break;
-                        }
+                var executePayload = JsonSerializer.Serialize(executeRequest, JsonOptions);
+                var executeResultElement = await plugin.ExecuteAsync("executeReports", executePayload, cancellationToken);
+                var ack = JsonSerializer.Deserialize<ExecuteReportsAcknowledgment>(
+                    executeResultElement.GetRawText(), JsonOptions);
 
-                        allComponents.AddRange(reportResult.Components);
-                    }
+                if (ack == null || !ack.Started)
+                {
+                    _consoleLogger.LogError("Failed to start report execution: {Error}", ack?.ErrorMessage ?? "Unknown error");
+                    return 2;
                 }
 
-                // Generate output report
+                // Poll for completion via plugin context events
+                var completionResult = await WaitForReportCompletionAsync(pluginContext, ack.OperationId, cancellationToken);
+
+                if (!completionResult.Success)
+                {
+                    _consoleLogger.LogError("Report execution failed: {Error}", completionResult.ErrorMessage);
+                    return 2;
+                }
+
+                // Extract results
+                var summary = completionResult.Summary;
+                var criticalCount = summary?.CriticalFindings ?? 0;
+                var warningCount = summary?.WarningFindings ?? 0;
+                var infoCount = summary?.InformationalFindings ?? 0;
+
+                // Save output content
                 var reportFileName = $"report-{DateTime.UtcNow:yyyyMMdd-HHmmss}.{GetFileExtension(_format)}";
                 var reportPath = Path.Combine(_outputDirectory.FullName, reportFileName);
                 
-                await GenerateOutputReportAsync(config, allComponents, reportPath, cancellationToken);
+                if (!string.IsNullOrEmpty(completionResult.OutputContent))
+                {
+                    await File.WriteAllTextAsync(reportPath, completionResult.OutputContent, cancellationToken);
+                    _consoleLogger.LogInformation("Report saved to: {ReportPath}", reportPath);
+                }
                 
-                _consoleLogger.LogInformation("Report saved to: {ReportPath}", reportPath);
                 _consoleLogger.LogInformation("Plugin logs: {PluginLog}", _pluginLogPath);
 
                 // Print summary
@@ -202,129 +237,110 @@ public class ReportExecutor
         }
     }
 
-    private async Task<ExecuteReportResponse> ExecuteReportViaPlugin(
-        SolutionLayerAnalyzerPlugin plugin,
-        ConfigReport report,
-        string connectionId,
-        CancellationToken cancellationToken
-    )
-    {
-        // Create a temporary saved report to execute
-        var saveRequest = new SaveReportRequest
-        {
-            ConnectionId = connectionId,
-            Name = report.Name,
-            Description = report.Description,
-            Severity = report.Severity,
-            RecommendedAction = report.RecommendedAction,
-            QueryJson = report.QueryJson
-        };
-
-        var savePayload = JsonSerializer.Serialize(saveRequest, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        });
-
-        var savedReportElement = await plugin.ExecuteAsync("saveReport", savePayload, cancellationToken);
-        var savedReport = JsonSerializer.Deserialize<ReportDto>(
-            savedReportElement.GetRawText(),
-            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-
-        if (savedReport == null)
-        {
-            throw new InvalidOperationException($"Failed to save report: {report.Name}");
-        }
-
-        // Execute the report
-        var executeRequest = new ExecuteReportRequest
-        {
-            Id = savedReport.Id,
-            ConnectionId = connectionId
-        };
-
-        var executePayload = JsonSerializer.Serialize(executeRequest, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        });
-
-        var resultElement = await plugin.ExecuteAsync("executeReport", executePayload, cancellationToken);
-        var result = JsonSerializer.Deserialize<ExecuteReportResponse>(
-            resultElement.GetRawText(),
-            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-
-        if (result == null)
-        {
-            throw new InvalidOperationException($"Failed to execute report: {report.Name}");
-        }
-
-        // Clean up the temporary report
-        var deleteRequest = new DeleteReportRequest
-        {
-            Id = savedReport.Id,
-            ConnectionId = connectionId
-        };
-
-        var deletePayload = JsonSerializer.Serialize(deleteRequest, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        });
-
-        await plugin.ExecuteAsync("deleteReport", deletePayload, cancellationToken);
-
-        return result;
-    }
-
-    private async Task GenerateOutputReportAsync(
-        AnalyzerConfig config,
-        List<ReportComponentResult> components,
-        string outputPath,
+    private async Task WaitForIndexCompletionAsync(
+        SolutionLayerAnalyzerPlugin plugin, 
+        string connectionId, 
         CancellationToken cancellationToken)
     {
-        // Create simple output structure
-        var output = new
-        {
-            GeneratedAt = DateTime.UtcNow,
-            SourceSolutions = config.SourceSolutions,
-            TargetSolutions = config.TargetSolutions,
-            TotalComponents = components.Count,
-            Components = components
-        };
+        // Poll index metadata until indexing is complete
+        var timeout = TimeSpan.FromMinutes(30);
+        var checkInterval = TimeSpan.FromSeconds(5);
+        var startTime = DateTime.UtcNow;
 
-        string content;
-        var lowerInvariant = _format.ToUpperInvariant();
-        switch (lowerInvariant)
+        while (DateTime.UtcNow - startTime < timeout)
         {
-            case "JSON":
-                content = JsonSerializer.Serialize(output, new JsonSerializerOptions
-                {
-                    WriteIndented = true,
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                });
-                break;
-            case "CSV":
-            {
-                // Simple CSV output
-                var lines = new List<string>
-                {
-                    "ComponentId,ComponentType,ComponentTypeName,LogicalName,DisplayName,Solutions"
-                };
-                lines.AddRange(components.Select(comp => $"{comp.ComponentId},{comp.ComponentType},{comp.ComponentTypeName},{comp.LogicalName},{comp.DisplayName},{string.Join(";", comp.Solutions)}"));
+            cancellationToken.ThrowIfCancellationRequested();
 
-                content = string.Join(Environment.NewLine, lines);
-                break;
-            }
-            // YAML
-            default:
+            var metadataRequest = new { ConnectionId = connectionId };
+            var metadataPayload = JsonSerializer.Serialize(metadataRequest, JsonOptions);
+            
+            try
             {
-                var serializer = new SerializerBuilder()
-                    .WithNamingConvention(CamelCaseNamingConvention.Instance)
-                    .Build();
-                content = serializer.Serialize(output);
-                break;
+                var resultElement = await plugin.ExecuteAsync("getIndexMetadata", metadataPayload, cancellationToken);
+                var metadata = JsonSerializer.Deserialize<JsonElement>(resultElement.GetRawText(), JsonOptions);
+                
+                if (metadata.TryGetProperty("componentCount", out var countProp) && countProp.GetInt32() > 0)
+                {
+                    _consoleLogger.LogInformation("Index complete: {ComponentCount} components indexed", countProp.GetInt32());
+                    return;
+                }
             }
+            catch
+            {
+                // Index might not be ready yet, continue waiting
+            }
+
+            await Task.Delay(checkInterval, cancellationToken);
         }
 
-        await File.WriteAllTextAsync(outputPath, content, cancellationToken);
+        throw new TimeoutException("Index operation timed out");
+    }
+
+    private async Task<ReportCompletionEvent> WaitForReportCompletionAsync(
+        CliPluginContext pluginContext,
+        string operationId,
+        CancellationToken cancellationToken)
+    {
+        var timeout = TimeSpan.FromMinutes(30);
+        var startTime = DateTime.UtcNow;
+
+        while (DateTime.UtcNow - startTime < timeout)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Check if we have a completion event
+            if (pluginContext.TryGetCompletionEvent(operationId, out var completionEvent))
+            {
+                return completionEvent;
+            }
+
+            // Log progress if available
+            if (pluginContext.TryGetProgressEvent(operationId, out var progressEvent))
+            {
+                _consoleLogger.LogInformation(
+                    "Progress: {Phase} - {Current}/{Total} ({Percent}%)", 
+                    progressEvent.Phase,
+                    progressEvent.CurrentReport,
+                    progressEvent.TotalReports,
+                    progressEvent.Percent);
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+        }
+
+        throw new TimeoutException("Report execution timed out");
+    }
+
+    private static ReportConfigFormat? DetectConfigFormat(string fileName)
+    {
+        var extension = Path.GetExtension(fileName).ToUpperInvariant();
+        return extension switch
+        {
+            ".JSON" => ReportConfigFormat.Json,
+            ".YAML" or ".YML" => ReportConfigFormat.Yaml,
+            ".XML" => ReportConfigFormat.Xml,
+            _ => null // Let plugin auto-detect
+        };
+    }
+
+    private static ReportVerbosity ParseVerbosity(string verbosity)
+    {
+        return verbosity.ToUpperInvariant() switch
+        {
+            "MEDIUM" => ReportVerbosity.Medium,
+            "VERBOSE" => ReportVerbosity.Verbose,
+            _ => ReportVerbosity.Basic
+        };
+    }
+
+    private static ReportOutputFormat ParseOutputFormat(string format)
+    {
+        return format.ToUpperInvariant() switch
+        {
+            "JSON" => ReportOutputFormat.Json,
+            "CSV" => ReportOutputFormat.Csv,
+            _ => ReportOutputFormat.Yaml
+        };
     }
 
     private ILogger CreatePluginLogger()
@@ -435,21 +451,6 @@ public class ReportExecutor
 
         // No failures - success
         return 0;
-    }
-
-    private async Task<AnalyzerConfig> LoadConfigurationAsync(CancellationToken cancellationToken)
-    {
-        if (!_configFile.Exists)
-        {
-            throw new FileNotFoundException($"Configuration file not found: {_configFile.FullName}");
-        }
-
-        var yaml = await File.ReadAllTextAsync(_configFile.FullName, cancellationToken);
-        var deserializer = new DeserializerBuilder()
-            .WithNamingConvention(CamelCaseNamingConvention.Instance)
-            .Build();
-        
-        return deserializer.Deserialize<AnalyzerConfig>(yaml);
     }
 
     private static string GetFileExtension(string format)

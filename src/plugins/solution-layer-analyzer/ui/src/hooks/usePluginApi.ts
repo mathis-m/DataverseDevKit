@@ -1,6 +1,23 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { hostBridge } from '@ddk/host-sdk';
-import { ComponentResult, IndexResponse, IndexCompletionEvent, FilterNode, AttributeDiff, IndexMetadata, QueryResultEvent, QueryAcknowledgment } from '../types';
+import { 
+  ComponentResult, 
+  IndexResponse, 
+  IndexCompletionEvent, 
+  FilterNode, 
+  AttributeDiff, 
+  IndexMetadata, 
+  QueryResultEvent, 
+  QueryAcknowledgment,
+  ReportConfig,
+  ReportConfigFormat,
+  ParseReportConfigResponse,
+  SerializeReportConfigResponse,
+  ExecuteReportsRequest,
+  ExecuteReportsAcknowledgment,
+  ReportProgressEvent,
+  ReportCompletionEvent,
+} from '../types';
 import { AnalyticsData } from '../types/analytics';
 import { transformFilterForBackend } from '../utils/filterTransform';
 import { useAppStore } from '../store/useAppStore';
@@ -10,16 +27,22 @@ const PLUGIN_ID = 'com.ddk.solutionlayeranalyzer';
 /** Generates a unique query ID */
 const generateQueryId = () => `q_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
+/** Generates a unique operation ID */
+const generateOperationId = () => `op_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
 export const usePluginApi = () => {
   const [indexing, setIndexing] = useState(false);
   const [diffing, setDiffing] = useState(false);
   const [indexCompletion, setIndexCompletion] = useState<IndexCompletionEvent | null>(null);
   
   // Get store actions for query state management
-  const { setQueryState, setAnalysisState, queryState } = useAppStore();
+  const { setQueryState, setAnalysisState, queryState, setReportRunState, reportRunState } = useAppStore();
   
   // Ref to track the latest query ID for event handler
   const latestQueryIdRef = useRef<string | null>(null);
+  
+  // Ref to track the latest report operation ID
+  const latestReportOperationIdRef = useRef<string | null>(null);
 
   // Listen for index completion events
   useEffect(() => {
@@ -90,6 +113,83 @@ export const usePluginApi = () => {
       unsubscribe();
     };
   }, [setAnalysisState, setQueryState]);
+
+  // Listen for report progress events
+  useEffect(() => {
+    const unsubscribe = hostBridge.addEventListener('plugin:sla:report-progress', (event) => {
+      console.log('Report progress event received:', event);
+      try {
+        const payload = typeof event.payload === 'string'
+          ? JSON.parse(event.payload)
+          : event.payload;
+        const progress = payload as ReportProgressEvent;
+        
+        // Only process if this is the latest operation
+        if (progress.operationId !== latestReportOperationIdRef.current) {
+          console.log(`Ignoring stale report progress: ${progress.operationId} (latest: ${latestReportOperationIdRef.current})`);
+          return;
+        }
+        
+        setReportRunState({ progress });
+      } catch (error) {
+        console.error('Failed to parse report progress event:', error);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [setReportRunState]);
+
+  // Listen for report completion events
+  useEffect(() => {
+    const unsubscribe = hostBridge.addEventListener('plugin:sla:report-complete', (event) => {
+      console.log('Report completion event received:', event);
+      try {
+        const payload = typeof event.payload === 'string'
+          ? JSON.parse(event.payload)
+          : event.payload;
+        const completion = payload as ReportCompletionEvent;
+        
+        // Only process if this is the latest operation
+        if (completion.operationId !== latestReportOperationIdRef.current) {
+          console.log(`Ignoring stale report completion: ${completion.operationId} (latest: ${latestReportOperationIdRef.current})`);
+          return;
+        }
+        
+        if (completion.success) {
+          setReportRunState({
+            isRunning: false,
+            progress: null,
+            results: completion.summary && completion.reports ? {
+              summary: completion.summary,
+              reports: completion.reports,
+            } : null,
+            outputContent: completion.outputContent || null,
+            outputFormat: completion.outputFormat || null,
+            lastError: null,
+          });
+        } else {
+          setReportRunState({
+            isRunning: false,
+            progress: null,
+            lastError: completion.errorMessage || 'Report execution failed',
+          });
+        }
+      } catch (error) {
+        console.error('Failed to parse report completion event:', error);
+        setReportRunState({
+          isRunning: false,
+          progress: null,
+          lastError: 'Failed to parse report completion event',
+        });
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [setReportRunState]);
 
   const indexSolutions = useCallback(async (
     sourceSolutions: string[],
@@ -354,10 +454,12 @@ export const usePluginApi = () => {
     getIndexMetadata,
     indexCompletion,
     queryState,
+    reportRunState,
     loading: {
       indexing,
       querying: queryState.isQuerying,
       diffing,
+      runningReports: reportRunState.isRunning,
     },
     getAnalytics: async (connectionId: string = 'default'): Promise<AnalyticsData> => {
       try {
@@ -367,6 +469,91 @@ export const usePluginApi = () => {
         return result;
       } catch (error) {
         console.error('Failed to get analytics:', error);
+        throw error;
+      }
+    },
+    
+    /**
+     * Parse a report configuration from file content.
+     * Supports JSON, YAML, and XML formats.
+     */
+    parseReportConfig: async (
+      content: string, 
+      format?: ReportConfigFormat
+    ): Promise<ParseReportConfigResponse> => {
+      try {
+        const payload = JSON.stringify({ content, format });
+        const result = await hostBridge.invokePluginCommand(PLUGIN_ID, 'parseReportConfig', payload);
+        return result as ParseReportConfigResponse;
+      } catch (error) {
+        console.error('Parse report config error:', error);
+        throw error;
+      }
+    },
+    
+    /**
+     * Serialize a report configuration to a specific format.
+     */
+    serializeReportConfig: async (
+      config: ReportConfig, 
+      format: ReportConfigFormat
+    ): Promise<SerializeReportConfigResponse> => {
+      try {
+        const payload = JSON.stringify({ config, format });
+        const result = await hostBridge.invokePluginCommand(PLUGIN_ID, 'serializeReportConfig', payload);
+        return result as SerializeReportConfigResponse;
+      } catch (error) {
+        console.error('Serialize report config error:', error);
+        throw error;
+      }
+    },
+    
+    /**
+     * Execute reports with the given configuration.
+     * This is an event-based operation - results will be delivered via events.
+     * Returns immediately with an acknowledgment.
+     */
+    executeReports: async (request: Omit<ExecuteReportsRequest, 'operationId'>): Promise<ExecuteReportsAcknowledgment> => {
+      const operationId = generateOperationId();
+      latestReportOperationIdRef.current = operationId;
+      
+      setReportRunState({
+        operationId,
+        isRunning: true,
+        progress: null,
+        results: null,
+        outputContent: null,
+        outputFormat: null,
+        lastError: null,
+      });
+      
+      try {
+        const payload = JSON.stringify({
+          operationId,
+          connectionId: request.connectionId ?? 'default',
+          config: request.config,
+          verbosity: request.verbosity,
+          format: request.format,
+          generateFile: request.generateFile,
+        });
+        
+        const result = await hostBridge.invokePluginCommand(PLUGIN_ID, 'executeReports', payload);
+        const ack = result as ExecuteReportsAcknowledgment;
+        
+        if (!ack.started) {
+          setReportRunState({
+            isRunning: false,
+            lastError: ack.errorMessage || 'Failed to start report execution',
+          });
+        }
+        
+        return ack;
+      } catch (error) {
+        console.error('Execute reports error:', error);
+        setReportRunState({
+          isRunning: false,
+          lastError: error instanceof Error ? error.message : 'Failed to execute reports',
+        });
         throw error;
       }
     },

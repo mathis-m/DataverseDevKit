@@ -2,209 +2,146 @@ using Ddk.SolutionLayerAnalyzer.Models;
 
 namespace Ddk.SolutionLayerAnalyzer.DTOs;
 
-// Request DTOs for report operations
+// ============================================================================
+// Stateless Report Configuration DTOs (UI-centric, no database)
+// ============================================================================
 
 /// <summary>
-/// Request to save a query/filter as a report
+/// A single report definition (in-memory, from UI)
 /// </summary>
-public class SaveReportRequest
+public class ReportDefinition
 {
-    public string ConnectionId { get; set; } = string.Empty;
+    public string Id { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
-    public int? GroupId { get; set; }
     public ReportSeverity Severity { get; set; } = ReportSeverity.Information;
     public string? RecommendedAction { get; set; }
     public string QueryJson { get; set; } = string.Empty;
-    public string? OriginatingIndexHash { get; set; }
-}
-
-/// <summary>
-/// Request to update an existing report
-/// </summary>
-public class UpdateReportRequest
-{
-    public int Id { get; set; }
-    public string ConnectionId { get; set; } = string.Empty;
-    public string? Name { get; set; }
-    public string? Description { get; set; }
-    public int? GroupId { get; set; }
-    public ReportSeverity? Severity { get; set; }
-    public string? RecommendedAction { get; set; }
-    public string? QueryJson { get; set; }
-}
-
-/// <summary>
-/// Request to delete a report
-/// </summary>
-public class DeleteReportRequest
-{
-    public int Id { get; set; }
-    public string ConnectionId { get; set; } = string.Empty;
-}
-
-/// <summary>
-/// Request to duplicate a report
-/// </summary>
-public class DuplicateReportRequest
-{
-    public int Id { get; set; }
-    public string ConnectionId { get; set; } = string.Empty;
-    public string? NewName { get; set; }
-}
-
-/// <summary>
-/// Request to reorder reports
-/// </summary>
-public class ReorderReportsRequest
-{
-    public string ConnectionId { get; set; } = string.Empty;
-    public List<ReportOrder> Reports { get; set; } = new();
-}
-
-public class ReportOrder
-{
-    public int Id { get; set; }
-    public int DisplayOrder { get; set; }
-    public int? GroupId { get; set; }
-}
-
-/// <summary>
-/// Request to execute a saved report
-/// </summary>
-public class ExecuteReportRequest
-{
-    public int Id { get; set; }
-    public string ConnectionId { get; set; } = string.Empty;
-}
-
-/// <summary>
-/// Request to list all reports
-/// </summary>
-public class ListReportsRequest
-{
-    public string ConnectionId { get; set; } = string.Empty;
-}
-
-/// <summary>
-/// Request to create a report group
-/// </summary>
-public class CreateReportGroupRequest
-{
-    public string ConnectionId { get; set; } = string.Empty;
-    public string Name { get; set; } = string.Empty;
-}
-
-/// <summary>
-/// Request to update a report group
-/// </summary>
-public class UpdateReportGroupRequest
-{
-    public int Id { get; set; }
-    public string ConnectionId { get; set; } = string.Empty;
-    public string? Name { get; set; }
-}
-
-/// <summary>
-/// Request to delete a report group
-/// </summary>
-public class DeleteReportGroupRequest
-{
-    public int Id { get; set; }
-    public string ConnectionId { get; set; } = string.Empty;
-}
-
-/// <summary>
-/// Request to reorder report groups
-/// </summary>
-public class ReorderReportGroupsRequest
-{
-    public string ConnectionId { get; set; } = string.Empty;
-    public List<GroupOrder> Groups { get; set; } = new();
-}
-
-public class GroupOrder
-{
-    public int Id { get; set; }
     public int DisplayOrder { get; set; }
 }
 
 /// <summary>
-/// Request to export analyzer configuration to YAML
+/// A group of reports (in-memory, from UI)
 /// </summary>
-public class ExportConfigRequest
+public class ReportGroupDefinition
 {
-    public string ConnectionId { get; set; } = string.Empty;
-    public string? FilePath { get; set; }
-}
-
-/// <summary>
-/// Request to import analyzer configuration from YAML
-/// </summary>
-public class ImportConfigRequest
-{
-    public string ConnectionId { get; set; } = string.Empty;
-    public string? FilePath { get; set; }
-    public string? ConfigYaml { get; set; }
-}
-
-// Response DTOs
-
-/// <summary>
-/// Response with report data
-/// </summary>
-public class ReportDto
-{
-    public int Id { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public string? Description { get; set; }
-    public int? GroupId { get; set; }
-    public string? GroupName { get; set; }
-    public ReportSeverity Severity { get; set; }
-    public string? RecommendedAction { get; set; }
-    public string QueryJson { get; set; } = string.Empty;
-    public int DisplayOrder { get; set; }
-    public string? OriginatingIndexHash { get; set; }
-    public DateTime CreatedAt { get; set; }
-    public DateTime? ModifiedAt { get; set; }
-    public DateTime? LastExecutedAt { get; set; }
-}
-
-/// <summary>
-/// Response with report group data
-/// </summary>
-public class ReportGroupDto
-{
-    public int Id { get; set; }
+    public string Id { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public int DisplayOrder { get; set; }
-    public List<ReportDto> Reports { get; set; } = new();
-    public DateTime CreatedAt { get; set; }
-    public DateTime? ModifiedAt { get; set; }
+    public List<ReportDefinition> Reports { get; set; } = new();
 }
 
 /// <summary>
-/// Response with all reports organized by groups
+/// Full report configuration (in-memory, from UI)
 /// </summary>
-public class ListReportsResponse
+public class ReportConfigDefinition
 {
-    public List<ReportGroupDto> Groups { get; set; } = new();
-    public List<ReportDto> UngroupedReports { get; set; } = new();
+    public List<string> SourceSolutions { get; set; } = new();
+    public List<string> TargetSolutions { get; set; } = new();
+    public List<int>? ComponentTypes { get; set; }
+    public List<ReportGroupDefinition> ReportGroups { get; set; } = new();
+    public List<ReportDefinition> UngroupedReports { get; set; } = new();
 }
 
 /// <summary>
-/// Response from executing a report
+/// Supported formats for report config serialization
 /// </summary>
-public class ExecuteReportResponse
+public enum ReportConfigFormat
 {
-    public int ReportId { get; set; }
-    public string ReportName { get; set; } = string.Empty;
-    public ReportSeverity Severity { get; set; }
-    public int TotalMatches { get; set; }
-    public List<ReportComponentResult> Components { get; set; } = new();
-    public DateTime ExecutedAt { get; set; }
+    Json,
+    Yaml,
+    Xml
 }
 
+/// <summary>
+/// Request to parse a report configuration from file content
+/// </summary>
+public class ParseReportConfigRequest
+{
+    public string Content { get; set; } = string.Empty;
+    public ReportConfigFormat? Format { get; set; } // Auto-detect if null
+}
+
+/// <summary>
+/// Response from parsing a report configuration
+/// </summary>
+public class ParseReportConfigResponse
+{
+    public ReportConfigDefinition Config { get; set; } = new();
+    public List<string> Errors { get; set; } = new();
+    public List<string> Warnings { get; set; } = new();
+}
+
+/// <summary>
+/// Request to serialize a report configuration
+/// </summary>
+public class SerializeReportConfigRequest
+{
+    public ReportConfigDefinition Config { get; set; } = new();
+    public ReportConfigFormat Format { get; set; } = ReportConfigFormat.Yaml;
+}
+
+/// <summary>
+/// Response from serializing a report configuration
+/// </summary>
+public class SerializeReportConfigResponse
+{
+    public string Content { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Request to execute reports with a given configuration (event-based)
+/// </summary>
+public class ExecuteReportsRequest
+{
+    public string? OperationId { get; set; }
+    public string ConnectionId { get; set; } = string.Empty;
+    public ReportConfigDefinition Config { get; set; } = new();
+    public ReportVerbosity Verbosity { get; set; } = ReportVerbosity.Basic;
+    public ReportOutputFormat? Format { get; set; }
+    public bool GenerateFile { get; set; }
+}
+
+/// <summary>
+/// Acknowledgment when starting report execution
+/// </summary>
+public class ExecuteReportsAcknowledgment
+{
+    public string OperationId { get; set; } = string.Empty;
+    public bool Started { get; set; }
+    public string? ErrorMessage { get; set; }
+}
+
+/// <summary>
+/// Progress event during report execution
+/// </summary>
+public class ReportProgressEvent
+{
+    public string OperationId { get; set; } = string.Empty;
+    public int CurrentReport { get; set; }
+    public int TotalReports { get; set; }
+    public string? CurrentReportName { get; set; }
+    public string Phase { get; set; } = "starting"; // starting, executing, generating-output, complete
+    public int Percent { get; set; }
+}
+
+/// <summary>
+/// Completion event with report execution results
+/// </summary>
+public class ReportCompletionEvent
+{
+    public string OperationId { get; set; } = string.Empty;
+    public bool Success { get; set; }
+    public ReportSummary? Summary { get; set; }
+    public List<ReportExecutionResult>? Reports { get; set; }
+    public string? OutputContent { get; set; } // Serialized file content if generateFile was true
+    public ReportOutputFormat? OutputFormat { get; set; }
+    public string? ErrorMessage { get; set; }
+}
+
+/// <summary>
+/// Simple component result without layer details (used internally for queries)
+/// </summary>
 public class ReportComponentResult
 {
     public string ComponentId { get; set; } = string.Empty;
@@ -213,38 +150,6 @@ public class ReportComponentResult
     public string? LogicalName { get; set; }
     public string? DisplayName { get; set; }
     public List<string> Solutions { get; set; } = new();
-}
-
-/// <summary>
-/// Response from exporting configuration
-/// </summary>
-public class ExportConfigResponse
-{
-    public string ConfigYaml { get; set; } = string.Empty;
-    public string? FilePath { get; set; }
-}
-
-/// <summary>
-/// Response from importing configuration
-/// </summary>
-public class ImportConfigResponse
-{
-    public int GroupsImported { get; set; }
-    public int ReportsImported { get; set; }
-    public List<string> Warnings { get; set; } = new();
-}
-
-/// <summary>
-/// Request to generate a report output file
-/// </summary>
-public class GenerateReportOutputRequest
-{
-    public string ConnectionId { get; set; } = string.Empty;
-    public int? ReportId { get; set; }
-    public List<int>? ReportIds { get; set; }
-    public ReportOutputFormat Format { get; set; } = ReportOutputFormat.Yaml;
-    public ReportVerbosity Verbosity { get; set; } = ReportVerbosity.Basic;
-    public string? FilePath { get; set; }
 }
 
 /// <summary>
@@ -276,16 +181,6 @@ public enum ReportVerbosity
     /// Verbose - Components + layer attributes with full changed values
     /// </summary>
     Verbose
-}
-
-/// <summary>
-/// Response from generating report output
-/// </summary>
-public class GenerateReportOutputResponse
-{
-    public string OutputContent { get; set; } = string.Empty;
-    public string? FilePath { get; set; }
-    public ReportOutputFormat Format { get; set; }
 }
 
 /// <summary>
