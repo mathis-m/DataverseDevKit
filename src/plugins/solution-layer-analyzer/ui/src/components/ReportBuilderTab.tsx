@@ -43,6 +43,7 @@ import { AdvancedFilterBuilder } from './AdvancedFilterBuilder';
 import { RunReportsDialog } from './RunReportsDialog';
 import { ReportSummaryPanel } from './ReportSummaryPanel';
 import { FilterNode, Report, ReportGroup, ReportSeverity, ReportConfigFormat } from '../types';
+import { transformFilterForBackend } from '../utils/filterTransform';
 
 const useStyles = makeStyles({
   container: {
@@ -773,7 +774,7 @@ export const ReportBuilderTab: React.FC = () => {
                             filterState: analysisFilter,
                             report: {
                               ...editingReport.report,
-                              queryJson: JSON.stringify(analysisFilter),
+                              queryJson: JSON.stringify(transformFilterForBackend(analysisFilter)),
                             },
                           });
                         }}
@@ -799,7 +800,7 @@ export const ReportBuilderTab: React.FC = () => {
                           filterState: newFilter,
                           report: {
                             ...editingReport.report,
-                            queryJson: JSON.stringify(newFilter),
+                            queryJson: JSON.stringify(transformFilterForBackend(newFilter)),
                           },
                         });
                       }}
