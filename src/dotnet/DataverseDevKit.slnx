@@ -9,6 +9,7 @@
     <Project Path="PluginRuntime/DataverseDevKit.PluginHost.csproj" />
   </Folder>
   <Folder Name="/Plugins/">
+    <Project Path="../cli/solution-analyzer/DataverseDevKit.SolutionAnalyzer.CLI/DataverseDevKit.SolutionAnalyzer.CLI.csproj" />
     <Project Path="../plugins/solution-layer-analyzer/src/Ddk.SolutionLayerAnalyzer.csproj" />
   </Folder>
   <Folder Name="/Shared/">

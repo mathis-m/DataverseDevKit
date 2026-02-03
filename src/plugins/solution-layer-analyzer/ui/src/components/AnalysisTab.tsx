@@ -25,6 +25,7 @@ import { ComponentFilterBar } from './ComponentFilterBar';
 import { ComponentList } from './ComponentList';
 import { ComponentDetailPanel } from './ComponentDetailPanel';
 import { VisualizationModal } from './VisualizationModal';
+import { SaveToReportDialog } from './SaveToReportDialog';
 import { LayerFlowSankey } from '../visualizations/LayerFlowSankey';
 import { LayerHeatmap } from '../visualizations/LayerHeatmap';
 import { LayerStackedBarChart } from '../visualizations/LayerStackedBarChart';
@@ -102,6 +103,7 @@ export const AnalysisTab: React.FC<AnalysisTabProps> = ({ onNavigateToDiff }) =>
     setAnalysisState({ groupBy: by }), [setAnalysisState]);
 
   const [fullscreenViz, setFullscreenViz] = useState<boolean>(false);
+  const [showSaveToReport, setShowSaveToReport] = useState<boolean>(false);
 
   const loadComponents = useCallback(async (filter?: FilterNode | null) => {
     console.log('[AnalysisTab] loadComponents called with filter:', JSON.stringify(filter, null, 2));
@@ -345,6 +347,12 @@ export const AnalysisTab: React.FC<AnalysisTabProps> = ({ onNavigateToDiff }) =>
           <LayerStackedBarChart components={filteredComponents} groupBy={groupBy} width={window.innerWidth * 0.9} height={window.innerHeight * 0.8} />
         )}
       </VisualizationModal>
+
+      <SaveToReportDialog
+        open={showSaveToReport}
+        onOpenChange={setShowSaveToReport}
+        currentFilter={advancedFilter}
+      />
     </div>
   );
 };

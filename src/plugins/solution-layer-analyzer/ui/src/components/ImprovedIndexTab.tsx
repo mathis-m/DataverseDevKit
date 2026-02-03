@@ -167,7 +167,7 @@ export const ImprovedIndexTab: React.FC<IndexTabProps> = ({ onIndexComplete }) =
 
         <Field 
           label={
-            <InfoLabel info="Select the base or core solutions that contain the original components. These are typically your foundation solutions that other solutions layer on top of.">
+            <InfoLabel info="Select the base or core solutions that contain the original components. These are typically your core solutions that other solutions layer on top of.">
               Source Solutions
             </InfoLabel>
           }

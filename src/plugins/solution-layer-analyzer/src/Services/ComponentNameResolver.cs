@@ -1,3 +1,4 @@
+using DataverseDevKit.Core.Exceptions;
 using Ddk.SolutionLayerAnalyzer.Data;
 using Ddk.SolutionLayerAnalyzer.Models;
 using Microsoft.EntityFrameworkCore;
@@ -156,6 +157,11 @@ public sealed class ComponentNameResolver
                 dbContext.ComponentNameCache.Add(cacheEntry);
                 _sessionCache[(objectId, typeCode)] = resolved;
             }
+            catch (SessionExpiredException ex)
+            {
+                _logger.LogError(ex, "Session timed out while discovering solutions");
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to resolve component {ObjectId} of type {TypeCode}", objectId, typeCode);
@@ -202,6 +208,11 @@ public sealed class ComponentNameResolver
                 ComponentTypeCodes.Relationship or ComponentTypeCodes.EntityRelationship => await ResolveRelationshipAsync(objectId, cancellationToken),
                 _ => FallbackToId(objectId, componentTypeCode)
             };
+        }
+        catch (SessionExpiredException ex)
+        {
+            _logger.LogError(ex, "Session timed out while discovering solutions");
+            throw;
         }
         catch (Exception ex)
         {

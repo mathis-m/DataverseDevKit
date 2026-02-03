@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using DataverseDevKit.Core.Abstractions;
+using DataverseDevKit.Core.Exceptions;
 using DataverseDevKit.Core.Models;
 using Ddk.SolutionLayerAnalyzer.Data;
 using Ddk.SolutionLayerAnalyzer.DTOs;
@@ -261,6 +262,11 @@ public class IndexingService
             
             _logger.LogInformation("Indexed {Count} solutions", solutions.Count);
         }
+        catch (SessionExpiredException ex)
+        {
+            _logger.LogError(ex, "Session timed out while discovering solutions");
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error discovering solutions");
@@ -397,6 +403,11 @@ public class IndexingService
             
             _logger.LogInformation("Discovered {Count} components", components.Count);
         }
+        catch (SessionExpiredException ex)
+        {
+            _logger.LogError(ex, "Session timed out while discovering solutions");
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error discovering components");
@@ -461,7 +472,7 @@ public class IndexingService
                 {
                     do
                     {
-                        results = await Task.Run(() => _serviceClient.RetrieveMultiple(query), cancellationToken);
+                        results = await _serviceClient.RetrieveMultipleAsync(query, cancellationToken);
                         componentLayerCount += results.Entities.Count;
 
                         foreach (var entity in results.Entities)
@@ -529,6 +540,11 @@ public class IndexingService
                     {
                         _logger.LogDebug("Found {Count} layers for component {ComponentId}", componentLayerCount, component.ComponentId);
                     }
+                }
+                catch (SessionExpiredException ex)
+                {
+                    _logger.LogError(ex, "Session timed out while discovering solutions");
+                    throw;
                 }
                 catch (Exception ex)
                 {
