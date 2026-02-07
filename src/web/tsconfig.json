@@ -18,7 +18,6 @@
     "forceConsistentCasingInFileNames": true,
     "paths": {
       "@ddk/host-sdk": ["./packages/host-sdk/src"],
-      "@ddk/ui-components": ["./packages/ui-components/src"]
     }
   }
 }

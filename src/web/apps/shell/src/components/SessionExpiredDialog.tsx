@@ -12,7 +12,7 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { Warning24Regular } from '@fluentui/react-icons';
-import hostBridge, { type SessionExpiredPayload } from '@ddk/host-sdk';
+import { hostBridge, type SessionExpiredPayload } from '@ddk/host-sdk';
 
 const useStyles = makeStyles({
   warningIcon: {

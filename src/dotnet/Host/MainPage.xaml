@@ -5,7 +5,6 @@
 
     <HybridWebView x:Name="hybridWebView"
                    HybridRoot="wwwroot"
-                   DefaultFile="index.html"
                    HorizontalOptions="Fill"
                    VerticalOptions="Fill" />
 

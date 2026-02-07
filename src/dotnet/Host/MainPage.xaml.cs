@@ -5,11 +5,13 @@ using System.Text.Json;
 
 namespace DataverseDevKit.Host;
 
-public partial class MainPage : ContentPage
+public partial class MainPage : ContentPage, IDisposable
 {
     private readonly JsonRpcBridge _bridge;
     private readonly PluginHostManager _pluginHostManager;
     private readonly ILogger<MainPage> _logger;
+    private readonly HttpClient _httpClient;
+    private bool _disposed;
 
     public MainPage(JsonRpcBridge bridge, PluginHostManager pluginHostManager, ILogger<MainPage> logger)
     {
@@ -17,21 +19,47 @@ public partial class MainPage : ContentPage
         _bridge = bridge;
         _pluginHostManager = pluginHostManager;
         _logger = logger;
+        _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(1) };
 
-# if DEBUG
-        hybridWebView.DefaultFile = "dev-redirect.html";
+        // Wire up the bridge
+        hybridWebView.RawMessageReceived += OnRawMessageReceived;
+
+        // Subscribe to plugin events
+        _pluginHostManager.PluginEventReceived += OnPluginEventReceived;
+
+#if DEBUG
+        if (IsDevServerAvailableAsync("http://localhost:5173"))
+        {
+            _logger.LogInformation("Dev server available, using dev-redirect.html");
+            hybridWebView.DefaultFile = "dev-redirect.html";
+        }
+        else
+        {
+            _logger.LogInformation("Dev server not available, using index.html");
+            hybridWebView.DefaultFile = "index.html";
+        }
 #else
         hybridWebView.DefaultFile = "index.html";
 #endif
 
-        // Wire up the bridge
-        hybridWebView.RawMessageReceived += OnRawMessageReceived;
-        
-        // Subscribe to plugin events
-        _pluginHostManager.PluginEventReceived += OnPluginEventReceived;
-        
         _logger.LogInformation("HybridWebView initialized with DefaultFile: {DefaultFile}", hybridWebView.DefaultFile);
     }
+
+    private bool IsDevServerAvailableAsync(string url)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Head, url);
+            using var response = _httpClient.Send(request);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Dev server check failed for {Url}", url);
+            return false;
+        }
+    }
+
 
     private async void OnRawMessageReceived(object? sender, HybridWebViewRawMessageReceivedEventArgs e)
     {
@@ -39,7 +67,7 @@ public partial class MainPage : ContentPage
         {
             var message = e.Message;
             _logger.LogInformation("📨 Received message from WebView: {Message}", message);
-            
+
             if (string.IsNullOrEmpty(message))
             {
                 _logger.LogWarning("Received empty message from WebView");
@@ -47,9 +75,9 @@ public partial class MainPage : ContentPage
             }
 
             var response = await _bridge.HandleMessageAsync(message);
-            
+
             _logger.LogInformation("📤 Sending response to WebView: {Response}", response);
-            
+
             if (!string.IsNullOrEmpty(response))
             {
                 // Encode response as base64 to avoid escaping issues with nested JSON strings
@@ -95,9 +123,9 @@ public partial class MainPage : ContentPage
                 payload = payloadElement,
                 timestamp = evt.Timestamp,
                 metadata = evt.Metadata
-            }, new JsonSerializerOptions 
-            { 
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase 
+            }, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
             });
 
             // Marshal to UI thread before interacting with WebView (COM component)
@@ -109,7 +137,7 @@ public partial class MainPage : ContentPage
                     var base64Event = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(eventJson));
                     var script = $"window.__ddkBridge.handleResponse('{base64Event}');";
                     await hybridWebView.EvaluateJavaScriptAsync(script);
-                    
+
                     _logger.LogInformation("✅ Event forwarded to frontend: {EventType}", evt.Type);
                 }
                 catch (Exception ex)
@@ -122,5 +150,31 @@ public partial class MainPage : ContentPage
         {
             _logger.LogError(ex, "Error forwarding plugin event to frontend");
         }
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (disposing)
+        {
+            // Dispose managed resources
+            hybridWebView.RawMessageReceived -= OnRawMessageReceived;
+            _pluginHostManager.PluginEventReceived -= OnPluginEventReceived;
+            _httpClient?.Dispose();
+        }
+
+        // Dispose unmanaged resources here if any
+
+        _disposed = true;
+    }
+
+    public void Dispose()
+    {
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
     }
 }

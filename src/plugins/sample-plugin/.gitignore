@@ -1,7 +1,0 @@
-# Build outputs
-dist/
-src/bin/
-src/obj/
-
-# UI dependencies and build
-ui/node_modules/
