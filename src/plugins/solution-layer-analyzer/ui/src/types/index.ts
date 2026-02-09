@@ -189,6 +189,54 @@ export interface QueryResultEvent {
 
 export type GroupByOption = 'solution' | 'componentType' | 'table' | 'publisher' | 'managed';
 
+export type ReportOutputFormat = 'Json' | 'Yaml' | 'Csv';
+export type ReportVerbosity = 'Basic' | 'Medium' | 'Verbose';
+export type ReportSeverity = 'Information' | 'Warning' | 'Critical';
+
+export interface GenerateReportOutputRequest {
+  connectionId?: string;
+  format: ReportOutputFormat;
+  verbosity: ReportVerbosity;
+}
+
+export interface ReportComponentLayer {
+  solutionName: string;
+  changedAttributes?: Array<{ attributeName: string }>;
+}
+
+export interface ReportComponent {
+  componentId: string;
+  componentTypeName: string;
+  displayName?: string;
+  logicalName?: string;
+  solutions?: string[];
+  layers?: ReportComponentLayer[];
+  makePortalUrl?: string;
+}
+
+export interface ReportItem {
+  name: string;
+  severity: ReportSeverity;
+  group?: string;
+  totalMatches: number;
+  recommendedAction?: string;
+  components?: ReportComponent[];
+}
+
+export interface ReportSummary {
+  totalReports: number;
+  criticalFindings: number;
+  warningFindings: number;
+  informationalFindings: number;
+  totalComponents: number;
+}
+
+export interface GenerateReportOutputResponse {
+  outputContent?: string;
+  summary?: ReportSummary;
+  reports?: ReportItem[];
+}
+
 export interface FilterOptions {
   componentTypes: string[];
   solutions: string[];
@@ -205,4 +253,125 @@ export interface AttributeDiff {
   onlyInLeft: boolean;
   onlyInRight: boolean;
   isDifferent: boolean;
+}
+
+// ============================================================================
+// Report Builder Types
+// ============================================================================
+
+/**
+ * A single report definition with a filter query
+ */
+export interface Report {
+  id: string;
+  name: string;
+  description?: string;
+  severity: ReportSeverity;
+  recommendedAction?: string;
+  queryJson: string;
+  displayOrder: number;
+}
+
+/**
+ * A group of reports
+ */
+export interface ReportGroup {
+  id: string;
+  name: string;
+  displayOrder: number;
+  reports: Report[];
+}
+
+/**
+ * Full report configuration (groups + ungrouped reports)
+ */
+export interface ReportConfig {
+  sourceSolutions: string[];
+  targetSolutions: string[];
+  componentTypes?: number[];
+  reportGroups: ReportGroup[];
+  ungroupedReports: Report[];
+}
+
+/**
+ * Format for report config serialization
+ */
+export type ReportConfigFormat = 'json' | 'yaml' | 'xml';
+
+/**
+ * Request to parse a report config from file content
+ */
+export interface ParseReportConfigRequest {
+  content: string;
+  format?: ReportConfigFormat; // Auto-detect if not provided
+}
+
+/**
+ * Response from parsing a report config
+ */
+export interface ParseReportConfigResponse {
+  config: ReportConfig;
+  errors?: string[];
+  warnings?: string[];
+}
+
+/**
+ * Request to serialize a report config to a specific format
+ */
+export interface SerializeReportConfigRequest {
+  config: ReportConfig;
+  format: ReportConfigFormat;
+}
+
+/**
+ * Response from serializing a report config
+ */
+export interface SerializeReportConfigResponse {
+  content: string;
+}
+
+/**
+ * Request to execute reports (event-based)
+ */
+export interface ExecuteReportsRequest {
+  operationId?: string;
+  connectionId?: string;
+  config: ReportConfig;
+  verbosity: ReportVerbosity;
+  format?: ReportOutputFormat;
+  generateFile?: boolean;
+}
+
+/**
+ * Acknowledgment when starting report execution
+ */
+export interface ExecuteReportsAcknowledgment {
+  operationId: string;
+  started: boolean;
+  errorMessage?: string;
+}
+
+/**
+ * Progress event during report execution
+ */
+export interface ReportProgressEvent {
+  operationId: string;
+  currentReport: number;
+  totalReports: number;
+  currentReportName?: string;
+  phase: 'starting' | 'executing' | 'generating-output' | 'complete';
+  percent: number;
+}
+
+/**
+ * Completion event with report execution results
+ */
+export interface ReportCompletionEvent {
+  operationId: string;
+  success: boolean;
+  summary?: ReportSummary;
+  reports?: ReportItem[];
+  outputContent?: string; // Serialized file content if generateFile was true
+  outputFormat?: ReportOutputFormat;
+  errorMessage?: string;
 }

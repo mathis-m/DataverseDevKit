@@ -1,23 +1,38 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import federation from "@originjs/vite-plugin-federation";
+import { federation } from "@module-federation/vite";
+import { dependencies } from "./package.json";
 
 export default defineConfig({
   plugins: [
-    react(),
     federation({
       name: "sla_plugin",
       filename: "remoteEntry.js",
       exposes: {
         "./Plugin": "./src/Plugin.tsx",
       },
-      shared: [
-        "react",
-        "react-dom",
-        "@fluentui/react-components",
-        "@fluentui/react-icons",
-      ],
+      shared: {
+        react: { singleton: true, requiredVersion: dependencies.react },
+        "react-dom": {
+          singleton: true,
+          requiredVersion: dependencies["react-dom"],
+        },
+        "@fluentui/react-components": {
+          singleton: true,
+          requiredVersion: dependencies["@fluentui/react-components"],
+        },
+        "@fluentui/react-icons": {
+          singleton: true,
+          requiredVersion: dependencies["@fluentui/react-icons"],
+        },
+        "@ddk/host-sdk": {
+          singleton: true,
+          requiredVersion: dependencies["@ddk/host-sdk"],
+        },
+      },
+      dts: false,
     }),
+    react(),
   ],
   build: {
     modulePreload: false,

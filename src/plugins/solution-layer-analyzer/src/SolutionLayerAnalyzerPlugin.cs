@@ -319,6 +319,24 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
                 Name = "getAnalytics",
                 Label = "Get Analytics",
                 Description = "Get comprehensive analytics including risk scores, violations, and graph data"
+            },
+            new()
+            {
+                Name = "parseReportConfig",
+                Label = "Parse Report Config",
+                Description = "Parse a report configuration from JSON, YAML, or XML content"
+            },
+            new()
+            {
+                Name = "serializeReportConfig",
+                Label = "Serialize Report Config",
+                Description = "Serialize a report configuration to JSON, YAML, or XML"
+            },
+            new()
+            {
+                Name = "executeReports",
+                Label = "Execute Reports",
+                Description = "Execute reports from an in-memory configuration with event-based progress"
             }
         };
 
@@ -356,6 +374,9 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             "loadIndexConfigs" => await ExecuteLoadIndexConfigsAsync(payload, cancellationToken),
             "saveFilterConfig" => await ExecuteSaveFilterConfigAsync(payload, cancellationToken),
             "loadFilterConfigs" => await ExecuteLoadFilterConfigsAsync(payload, cancellationToken),
+            "parseReportConfig" => ExecuteParseReportConfigAsync(payload),
+            "serializeReportConfig" => ExecuteSerializeReportConfigAsync(payload),
+            "executeReports" => await ExecuteExecuteReportsAsync(payload, cancellationToken),
             _ => throw new ArgumentException($"Unknown command: {commandName}", nameof(commandName))
         };
     }
@@ -776,7 +797,7 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             ColumnSet = new Microsoft.Xrm.Sdk.Query.ColumnSet("uniquename", "friendlyname", "version", "ismanaged", "publisherid")
         };
 
-        var results = await Task.Run(() => serviceClient.RetrieveMultiple(query), cancellationToken);
+        var results = await serviceClient.RetrieveMultipleAsync(query, cancellationToken);
 
         var solutions = new List<SolutionInfo>();
         foreach (var entity in results.Entities)
@@ -872,6 +893,137 @@ public sealed class SolutionLayerAnalyzerPlugin : IToolPlugin
             analytics.Violations.Count);
 
         return JsonSerializer.SerializeToElement(analytics, JsonOptions);
+    }
+
+    private JsonElement ExecuteParseReportConfigAsync(string payload)
+    {
+        var request = JsonSerializer.Deserialize<ParseReportConfigRequest>(payload, JsonOptions)
+            ?? throw new ArgumentException("Invalid parseReportConfig request payload", nameof(payload));
+
+        _context!.Logger.LogInformation("Parsing report config");
+
+        // Use a minimal service instance for parsing (no DB needed)
+        var reportService = new ReportService(null!, _context.Logger, null!);
+        var response = reportService.ParseConfig(request);
+
+        return JsonSerializer.SerializeToElement(response, JsonOptions);
+    }
+
+    private JsonElement ExecuteSerializeReportConfigAsync(string payload)
+    {
+        var request = JsonSerializer.Deserialize<SerializeReportConfigRequest>(payload, JsonOptions)
+            ?? throw new ArgumentException("Invalid serializeReportConfig request payload", nameof(payload));
+
+        _context!.Logger.LogInformation("Serializing report config to {Format}", request.Format);
+
+        // Use a minimal service instance for serialization (no DB needed)
+        var reportService = new ReportService(null!, _context.Logger, null!);
+        var response = reportService.SerializeConfig(request);
+
+        return JsonSerializer.SerializeToElement(response, JsonOptions);
+    }
+
+    private async Task<JsonElement> ExecuteExecuteReportsAsync(string payload, CancellationToken cancellationToken)
+    {
+        var request = JsonSerializer.Deserialize<ExecuteReportsRequest>(payload, JsonOptions)
+            ?? throw new ArgumentException("Invalid executeReports request payload", nameof(payload));
+
+        var operationId = request.OperationId ?? Guid.NewGuid().ToString("N");
+
+        _context!.Logger.LogInformation("Starting report execution, operation: {OperationId}", operationId);
+
+        // Return acknowledgment immediately
+        var ack = new ExecuteReportsAcknowledgment
+        {
+            OperationId = operationId,
+            Started = true
+        };
+
+        // Create new request with operation ID
+        var requestWithOperationId = new ExecuteReportsRequest
+        {
+            OperationId = operationId,
+            ConnectionId = request.ConnectionId,
+            Config = request.Config,
+            Verbosity = request.Verbosity,
+            Format = request.Format,
+            GenerateFile = request.GenerateFile
+        };
+
+        // Start execution in background (fire-and-forget with proper error handling)
+        _ = ExecuteReportsAndEmitEventsAsync(requestWithOperationId, cancellationToken);
+
+        return JsonSerializer.SerializeToElement(ack, JsonOptions);
+    }
+
+    private async Task ExecuteReportsAndEmitEventsAsync(ExecuteReportsRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var dbContext = CreateDbContext(request.ConnectionId);
+            var queryService = new QueryService(dbContext);
+            var reportService = new ReportService(dbContext, _context!.Logger, queryService);
+
+            // Create progress handler that emits events
+            var progress = new Progress<ReportProgressEvent>(progressEvent =>
+            {
+                try
+                {
+                    var pluginEvent = new PluginEvent
+                    {
+                        PluginId = PluginId,
+                        Type = "plugin:sla:report-progress",
+                        Payload = JsonSerializer.Serialize(progressEvent, JsonOptions),
+                        Timestamp = DateTimeOffset.UtcNow
+                    };
+                    _context!.EmitEvent(pluginEvent);
+                    _context.Logger.LogDebug("Emitted report progress event: {Phase} {Percent}%", progressEvent.Phase, progressEvent.Percent);
+                }
+                catch (Exception ex)
+                {
+                    _context!.Logger.LogError(ex, "Failed to emit report progress event");
+                }
+            });
+
+            // Execute reports
+            var completionEvent = await reportService.ExecuteReportsFromConfigAsync(request, progress, cancellationToken);
+
+            // Emit completion event
+            var pluginCompletionEvent = new PluginEvent
+            {
+                PluginId = PluginId,
+                Type = "plugin:sla:report-complete",
+                Payload = JsonSerializer.Serialize(completionEvent, JsonOptions),
+                Timestamp = DateTimeOffset.UtcNow
+            };
+            _context!.EmitEvent(pluginCompletionEvent);
+            _context.Logger.LogInformation(
+                "Report execution completed, operation: {OperationId}, reports: {ReportCount}, total findings: {TotalFindings}",
+                request.OperationId,
+                completionEvent.Summary?.TotalReports ?? 0,
+                (completionEvent.Summary?.CriticalFindings ?? 0) + (completionEvent.Summary?.WarningFindings ?? 0) + (completionEvent.Summary?.InformationalFindings ?? 0));
+        }
+        catch (Exception ex)
+        {
+            _context!.Logger.LogError(ex, "Report execution failed, operation: {OperationId}", request.OperationId);
+
+            // Emit failure event
+            var failureEvent = new ReportCompletionEvent
+            {
+                OperationId = request.OperationId ?? string.Empty,
+                Success = false,
+                ErrorMessage = ex.Message
+            };
+
+            var pluginEvent = new PluginEvent
+            {
+                PluginId = PluginId,
+                Type = "plugin:sla:report-complete",
+                Payload = JsonSerializer.Serialize(failureEvent, JsonOptions),
+                Timestamp = DateTimeOffset.UtcNow
+            };
+            _context!.EmitEvent(pluginEvent);
+        }
     }
 
     /// <inheritdoc/>

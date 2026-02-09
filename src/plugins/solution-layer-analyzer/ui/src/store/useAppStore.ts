@@ -1,6 +1,18 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { IndexStats, FilterNode, ComponentResult, AttributeDiff, QueryPlanStats } from '../types';
+import { 
+  IndexStats, 
+  FilterNode, 
+  ComponentResult, 
+  AttributeDiff, 
+  QueryPlanStats,
+  Report,
+  ReportGroup,
+  ReportSummary,
+  ReportItem,
+  ReportOutputFormat,
+  ReportProgressEvent,
+} from '../types';
 
 export interface Solution {
   uniqueName: string;
@@ -99,6 +111,41 @@ export interface QueryState {
   lastError: string | null;
 }
 
+/**
+ * Report builder configuration state (persisted)
+ */
+export interface ReportBuilderState {
+  /** Report groups with their contained reports */
+  reportGroups: ReportGroup[];
+  /** Reports not assigned to any group */
+  ungroupedReports: Report[];
+}
+
+/**
+ * Report execution run state (not persisted)
+ */
+export interface ReportRunState {
+  /** Current operation ID for tracking */
+  operationId: string | null;
+  /** Whether reports are currently being executed */
+  isRunning: boolean;
+  /** Progress information during execution */
+  progress: ReportProgressEvent | null;
+  /** Execution results after completion */
+  results: {
+    summary: ReportSummary;
+    reports: ReportItem[];
+  } | null;
+  /** File content if generateFile was requested */
+  outputContent: string | null;
+  /** Format of the output content */
+  outputFormat: ReportOutputFormat | null;
+  /** Whether the summary panel is collapsed */
+  summaryCollapsed: boolean;
+  /** Error from last run */
+  lastError: string | null;
+}
+
 interface AppState {
   // Global metadata (loaded once)
   availableSolutions: Solution[];
@@ -121,6 +168,12 @@ interface AppState {
   
   // Query state (for event-based queries)
   queryState: QueryState;
+  
+  // Report builder state
+  reportBuilderState: ReportBuilderState;
+  
+  // Report run state
+  reportRunState: ReportRunState;
   
   // Legacy (keeping for backward compatibility)
   components: ComponentResult[];
@@ -152,6 +205,22 @@ interface AppState {
   
   // Query state actions
   setQueryState: (state: Partial<QueryState>) => void;
+  
+  // Report builder actions
+  setReportBuilderState: (state: Partial<ReportBuilderState>) => void;
+  addReportGroup: (group: ReportGroup) => void;
+  updateReportGroup: (groupId: string, updates: Partial<ReportGroup>) => void;
+  deleteReportGroup: (groupId: string) => void;
+  addReport: (report: Report, groupId?: string) => void;
+  updateReport: (reportId: string, updates: Partial<Report>, groupId?: string) => void;
+  deleteReport: (reportId: string, groupId?: string) => void;
+  moveReport: (reportId: string, fromGroupId: string | null, toGroupId: string | null) => void;
+  reorderReportGroups: (groupIds: string[]) => void;
+  reorderReports: (groupId: string | null, reportIds: string[]) => void;
+  
+  // Report run state actions
+  setReportRunState: (state: Partial<ReportRunState>) => void;
+  clearReportResults: () => void;
   
   // Legacy actions (keeping for backward compatibility)
   setComponents: (components: ComponentResult[]) => void;
@@ -201,6 +270,20 @@ const initialState = {
     lastQueryStats: null,
     lastError: null,
   } as QueryState,
+  reportBuilderState: {
+    reportGroups: [],
+    ungroupedReports: [],
+  } as ReportBuilderState,
+  reportRunState: {
+    operationId: null,
+    isRunning: false,
+    progress: null,
+    results: null,
+    outputContent: null,
+    outputFormat: null,
+    summaryCollapsed: false,
+    lastError: null,
+  } as ReportRunState,
   components: [],
   filterConfig: { filters: null },
   selectedComponentId: null,
@@ -245,6 +328,234 @@ export const useAppStore = create<AppState>()(
           queryState: { ...state.queryState, ...queryState },
         })),
       
+      // Report builder actions
+      setReportBuilderState: (reportBuilderState) =>
+        set((state) => ({
+          reportBuilderState: { ...state.reportBuilderState, ...reportBuilderState },
+        })),
+      
+      addReportGroup: (group) =>
+        set((state) => ({
+          reportBuilderState: {
+            ...state.reportBuilderState,
+            reportGroups: [...state.reportBuilderState.reportGroups, group],
+          },
+        })),
+      
+      updateReportGroup: (groupId, updates) =>
+        set((state) => ({
+          reportBuilderState: {
+            ...state.reportBuilderState,
+            reportGroups: state.reportBuilderState.reportGroups.map((g) =>
+              g.id === groupId ? { ...g, ...updates } : g
+            ),
+          },
+        })),
+      
+      deleteReportGroup: (groupId) =>
+        set((state) => {
+          const group = state.reportBuilderState.reportGroups.find((g) => g.id === groupId);
+          const reportsToMove = group?.reports || [];
+          return {
+            reportBuilderState: {
+              ...state.reportBuilderState,
+              reportGroups: state.reportBuilderState.reportGroups.filter((g) => g.id !== groupId),
+              // Move reports from deleted group to ungrouped
+              ungroupedReports: [...state.reportBuilderState.ungroupedReports, ...reportsToMove],
+            },
+          };
+        }),
+      
+      addReport: (report, groupId) =>
+        set((state) => {
+          if (groupId) {
+            return {
+              reportBuilderState: {
+                ...state.reportBuilderState,
+                reportGroups: state.reportBuilderState.reportGroups.map((g) =>
+                  g.id === groupId
+                    ? { ...g, reports: [...g.reports, report] }
+                    : g
+                ),
+              },
+            };
+          }
+          return {
+            reportBuilderState: {
+              ...state.reportBuilderState,
+              ungroupedReports: [...state.reportBuilderState.ungroupedReports, report],
+            },
+          };
+        }),
+      
+      updateReport: (reportId, updates, groupId) =>
+        set((state) => {
+          if (groupId) {
+            return {
+              reportBuilderState: {
+                ...state.reportBuilderState,
+                reportGroups: state.reportBuilderState.reportGroups.map((g) =>
+                  g.id === groupId
+                    ? {
+                        ...g,
+                        reports: g.reports.map((r) =>
+                          r.id === reportId ? { ...r, ...updates } : r
+                        ),
+                      }
+                    : g
+                ),
+              },
+            };
+          }
+          return {
+            reportBuilderState: {
+              ...state.reportBuilderState,
+              ungroupedReports: state.reportBuilderState.ungroupedReports.map((r) =>
+                r.id === reportId ? { ...r, ...updates } : r
+              ),
+            },
+          };
+        }),
+      
+      deleteReport: (reportId, groupId) =>
+        set((state) => {
+          if (groupId) {
+            return {
+              reportBuilderState: {
+                ...state.reportBuilderState,
+                reportGroups: state.reportBuilderState.reportGroups.map((g) =>
+                  g.id === groupId
+                    ? { ...g, reports: g.reports.filter((r) => r.id !== reportId) }
+                    : g
+                ),
+              },
+            };
+          }
+          return {
+            reportBuilderState: {
+              ...state.reportBuilderState,
+              ungroupedReports: state.reportBuilderState.ungroupedReports.filter(
+                (r) => r.id !== reportId
+              ),
+            },
+          };
+        }),
+      
+      moveReport: (reportId, fromGroupId, toGroupId) =>
+        set((state) => {
+          let report: Report | undefined;
+          let newReportGroups = [...state.reportBuilderState.reportGroups];
+          let newUngroupedReports = [...state.reportBuilderState.ungroupedReports];
+
+          // Remove from source
+          if (fromGroupId) {
+            const groupIdx = newReportGroups.findIndex((g) => g.id === fromGroupId);
+            if (groupIdx >= 0) {
+              report = newReportGroups[groupIdx].reports.find((r) => r.id === reportId);
+              newReportGroups[groupIdx] = {
+                ...newReportGroups[groupIdx],
+                reports: newReportGroups[groupIdx].reports.filter((r) => r.id !== reportId),
+              };
+            }
+          } else {
+            report = newUngroupedReports.find((r) => r.id === reportId);
+            newUngroupedReports = newUngroupedReports.filter((r) => r.id !== reportId);
+          }
+
+          if (!report) return state;
+
+          // Add to destination
+          if (toGroupId) {
+            const groupIdx = newReportGroups.findIndex((g) => g.id === toGroupId);
+            if (groupIdx >= 0) {
+              newReportGroups[groupIdx] = {
+                ...newReportGroups[groupIdx],
+                reports: [...newReportGroups[groupIdx].reports, report],
+              };
+            }
+          } else {
+            newUngroupedReports = [...newUngroupedReports, report];
+          }
+
+          return {
+            reportBuilderState: {
+              ...state.reportBuilderState,
+              reportGroups: newReportGroups,
+              ungroupedReports: newUngroupedReports,
+            },
+          };
+        }),
+      
+      reorderReportGroups: (groupIds) =>
+        set((state) => {
+          const groupMap = new Map(state.reportBuilderState.reportGroups.map((g) => [g.id, g]));
+          const reorderedGroups = groupIds
+            .map((id, index) => {
+              const group = groupMap.get(id);
+              return group ? { ...group, displayOrder: index } : null;
+            })
+            .filter((g): g is ReportGroup => g !== null);
+          return {
+            reportBuilderState: {
+              ...state.reportBuilderState,
+              reportGroups: reorderedGroups,
+            },
+          };
+        }),
+      
+      reorderReports: (groupId, reportIds) =>
+        set((state) => {
+          if (groupId) {
+            return {
+              reportBuilderState: {
+                ...state.reportBuilderState,
+                reportGroups: state.reportBuilderState.reportGroups.map((g) => {
+                  if (g.id !== groupId) return g;
+                  const reportMap = new Map(g.reports.map((r) => [r.id, r]));
+                  const reorderedReports = reportIds
+                    .map((id, index) => {
+                      const report = reportMap.get(id);
+                      return report ? { ...report, displayOrder: index } : null;
+                    })
+                    .filter((r): r is Report => r !== null);
+                  return { ...g, reports: reorderedReports };
+                }),
+              },
+            };
+          }
+          const reportMap = new Map(state.reportBuilderState.ungroupedReports.map((r) => [r.id, r]));
+          const reorderedReports = reportIds
+            .map((id, index) => {
+              const report = reportMap.get(id);
+              return report ? { ...report, displayOrder: index } : null;
+            })
+            .filter((r): r is Report => r !== null);
+          return {
+            reportBuilderState: {
+              ...state.reportBuilderState,
+              ungroupedReports: reorderedReports,
+            },
+          };
+        }),
+      
+      // Report run state actions
+      setReportRunState: (reportRunState) =>
+        set((state) => ({
+          reportRunState: { ...state.reportRunState, ...reportRunState },
+        })),
+      
+      clearReportResults: () =>
+        set((state) => ({
+          reportRunState: {
+            ...state.reportRunState,
+            results: null,
+            outputContent: null,
+            outputFormat: null,
+            progress: null,
+            lastError: null,
+          },
+        })),
+      
       setComponents: (components) => set({ components }),
       
       setFilterConfig: (config) => set({ filterConfig: config }),
@@ -285,6 +596,12 @@ export const useAppStore = create<AppState>()(
         },
         filterBarState: state.filterBarState,
         diffState: state.diffState,
+        // Persist report builder config but not run state
+        reportBuilderState: state.reportBuilderState,
+        // Persist summary collapsed state only
+        reportRunState: {
+          summaryCollapsed: state.reportRunState.summaryCollapsed,
+        },
         // Don't persist operations or runtime state
       }),
     }

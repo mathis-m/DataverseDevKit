@@ -13,9 +13,9 @@
     "entryPoint": "Ddk.SolutionLayerAnalyzer.SolutionLayerAnalyzerPlugin"
   },
   "ui": {
-    "devEntry": "http://localhost:5174/dist/assets/remoteEntry.js",
-    "entry": "frontend/assets/remoteEntry.js",
-    "module": "./Plugin",
+    "devEntry": "http://localhost:5174/dist/remoteEntry.js",
+    "entry": "frontend/remoteEntry.js",
+    "module": "Plugin",
     "scope": "solutionLayerAnalyzer"
   }
 }

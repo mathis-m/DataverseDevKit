@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from "react";
 import {
   makeStyles,
   tokens,
@@ -14,7 +14,7 @@ import {
   Text,
   Badge,
   Spinner,
-} from '@fluentui/react-components';
+} from "@fluentui/react-components";
 import {
   PlugConnectedRegular,
   PlugDisconnectedRegular,
@@ -23,38 +23,38 @@ import {
   CheckmarkRegular,
   PersonRegular,
   SignOutRegular,
-} from '@fluentui/react-icons';
-import { hostBridge } from '@ddk/host-sdk';
-import { useConnectionStore } from '../stores/connections';
-import { AddConnectionDialog } from './AddConnectionDialog';
+} from "@fluentui/react-icons";
+import { hostBridge } from "@ddk/host-sdk";
+import { useConnectionStore } from "../stores/connections";
+import { AddConnectionDialog } from "./AddConnectionDialog";
 
 const useStyles = makeStyles({
   container: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     ...shorthands.gap(tokens.spacingVerticalM),
     ...shorthands.padding(tokens.spacingVerticalXL),
-    height: '100%',
-    maxWidth: '1200px',
-    margin: '0 auto',
-    width: '100%',
+    height: "100%",
+    maxWidth: "1200px",
+    margin: "0 auto",
+    width: "100%",
   },
   header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   connectionList: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     ...shorthands.gap(tokens.spacingVerticalS),
-    overflowY: 'auto',
+    overflowY: "auto",
     ...shorthands.flex(1),
   },
   connectionCard: {
-    cursor: 'pointer',
-    ...shorthands.transition('all', '0.2s'),
-    '&:hover': {
+    cursor: "pointer",
+    ...shorthands.transition("all", "0.2s"),
+    "&:hover": {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
   },
@@ -62,14 +62,14 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorBrandBackground2,
   },
   connectionHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    width: '100%',
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    width: "100%",
   },
   connectionInfo: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     ...shorthands.gap(tokens.spacingVerticalXS),
   },
   connectionUrl: {
@@ -77,33 +77,34 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
   authInfo: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalS),
     marginTop: tokens.spacingVerticalXS,
   },
   userBadge: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalXS),
   },
   actionButtons: {
-    display: 'flex',
-    alignItems: 'center',
+    display: "flex",
+    alignItems: "center",
     ...shorthands.gap(tokens.spacingHorizontalS),
   },
 });
 
 export const ConnectionManager: React.FC = () => {
   const styles = useStyles();
-  const { connections, activeConnectionId, setConnections, setActiveConnection, removeConnection } =
-    useConnectionStore();
+  const {
+    connections,
+    activeConnectionId,
+    setConnections,
+    setActiveConnection,
+    removeConnection,
+  } = useConnectionStore();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [loggingIn, setLoggingIn] = useState<string | null>(null);
-
-  useEffect(() => {
-    loadConnections();
-  }, []);
 
   const loadConnections = async () => {
     try {
@@ -114,16 +115,21 @@ export const ConnectionManager: React.FC = () => {
         setActiveConnection(active.id);
       }
     } catch (error) {
-      console.error('Failed to load connections:', error);
+      console.error("Failed to load connections:", error);
     }
   };
+
+  useEffect(() => {
+    loadConnections();
+  }, []);
+
 
   const handleActivate = async (id: string) => {
     try {
       await hostBridge.activateConnection(id);
       setActiveConnection(id);
     } catch (error) {
-      console.error('Failed to activate connection:', error);
+      console.error("Failed to activate connection:", error);
     }
   };
 
@@ -132,7 +138,7 @@ export const ConnectionManager: React.FC = () => {
       await hostBridge.removeConnection(id);
       removeConnection(id);
     } catch (error) {
-      console.error('Failed to remove connection:', error);
+      console.error("Failed to remove connection:", error);
     }
   };
 
@@ -145,10 +151,10 @@ export const ConnectionManager: React.FC = () => {
         // Refresh connections to get updated auth state
         await loadConnections();
       } else {
-        console.error('Login failed:', result.error);
+        console.error("Login failed:", result.error);
       }
     } catch (error) {
-      console.error('Failed to login:', error);
+      console.error("Failed to login:", error);
     } finally {
       setLoggingIn(null);
     }
@@ -161,7 +167,7 @@ export const ConnectionManager: React.FC = () => {
       // Refresh connections to get updated auth state
       await loadConnections();
     } catch (error) {
-      console.error('Failed to logout:', error);
+      console.error("Failed to logout:", error);
     }
   };
 
@@ -185,24 +191,34 @@ export const ConnectionManager: React.FC = () => {
         {connections.map((connection) => (
           <Card
             key={connection.id}
-            className={`${styles.connectionCard} ${activeConnectionId === connection.id ? styles.activeCard : ''}`}
+            className={`${styles.connectionCard} ${activeConnectionId === connection.id ? styles.activeCard : ""}`}
             onClick={() => handleActivate(connection.id)}
           >
             <CardHeader
               image={
-                connection.isAuthenticated ? <PlugConnectedRegular /> : <PlugDisconnectedRegular />
+                connection.isAuthenticated ? (
+                  <PlugConnectedRegular />
+                ) : (
+                  <PlugDisconnectedRegular />
+                )
               }
               header={
                 <div className={styles.connectionHeader}>
                   <div className={styles.connectionInfo}>
                     <Text weight="semibold">{connection.name}</Text>
-                    <Text className={styles.connectionUrl}>{connection.url}</Text>
+                    <Text className={styles.connectionUrl}>
+                      {connection.url}
+                    </Text>
                     <div className={styles.authInfo}>
                       {connection.isAuthenticated ? (
                         <div className={styles.userBadge}>
-                          <Badge appearance="filled" color="success" size="small">
+                          <Badge
+                            appearance="filled"
+                            color="success"
+                            size="small"
+                          >
                             <PersonRegular style={{ marginRight: 4 }} />
-                            {connection.authenticatedUser || 'Authenticated'}
+                            {connection.authenticatedUser || "Authenticated"}
                           </Badge>
                         </div>
                       ) : (
@@ -213,7 +229,9 @@ export const ConnectionManager: React.FC = () => {
                     </div>
                   </div>
                   <div className={styles.actionButtons}>
-                    {activeConnectionId === connection.id && <CheckmarkRegular />}
+                    {activeConnectionId === connection.id && (
+                      <CheckmarkRegular />
+                    )}
                   </div>
                 </div>
               }
@@ -232,11 +250,19 @@ export const ConnectionManager: React.FC = () => {
                     <MenuList>
                       {!connection.isAuthenticated ? (
                         <MenuItem
-                          icon={loggingIn === connection.id ? <Spinner size="tiny" /> : <PersonRegular />}
+                          icon={
+                            loggingIn === connection.id ? (
+                              <Spinner size="tiny" />
+                            ) : (
+                              <PersonRegular />
+                            )
+                          }
                           onClick={(e) => handleLogin(connection.id, e)}
                           disabled={loggingIn === connection.id}
                         >
-                          {loggingIn === connection.id ? 'Signing in...' : 'Sign in'}
+                          {loggingIn === connection.id
+                            ? "Signing in..."
+                            : "Sign in"}
                         </MenuItem>
                       ) : (
                         <MenuItem
@@ -246,7 +272,12 @@ export const ConnectionManager: React.FC = () => {
                           Sign out
                         </MenuItem>
                       )}
-                      <MenuItem onClick={(e) => { e.stopPropagation(); handleRemove(connection.id); }}>
+                      <MenuItem
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemove(connection.id);
+                        }}
+                      >
                         Remove
                       </MenuItem>
                     </MenuList>
@@ -258,7 +289,10 @@ export const ConnectionManager: React.FC = () => {
         ))}
       </div>
 
-      <AddConnectionDialog open={dialogOpen} onClose={() => setDialogOpen(false)} />
+      <AddConnectionDialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+      />
     </div>
   );
 };

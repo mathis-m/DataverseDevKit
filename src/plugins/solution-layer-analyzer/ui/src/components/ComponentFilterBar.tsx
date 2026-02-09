@@ -16,6 +16,7 @@ import {
   DismissRegular,
   FilterRegular,
   InfoRegular,
+  SaveRegular,
 } from '@fluentui/react-icons';
 import { ComponentResult, FilterNode } from '../types';
 import { AdvancedFilterBuilder } from './AdvancedFilterBuilder';
@@ -53,6 +54,7 @@ interface ComponentFilterBarProps {
   availableSolutions?: string[];
   onFilterChange: (filteredComponents: ComponentResult[]) => void;
   onAdvancedFilterChange?: (filter: FilterNode | null) => void;
+  onSaveToReport?: () => void;
   loading?: boolean;
 }
 
@@ -61,6 +63,7 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
   availableSolutions,
   onFilterChange,
   onAdvancedFilterChange,
+  onSaveToReport,
   loading,
 }) => {
   const styles = useStyles();
@@ -237,12 +240,23 @@ export const ComponentFilterBar: React.FC<ComponentFilterBarProps> = ({
         </Button>
 
         {activeFilterCount > 0 && (
-          <Button
-            icon={<DismissRegular />}
-            onClick={clearFilter}
-          >
-            Clear Filters ({activeFilterCount})
-          </Button>
+          <>
+            <Button
+              icon={<DismissRegular />}
+              onClick={clearFilter}
+            >
+              Clear Filters ({activeFilterCount})
+            </Button>
+            {onSaveToReport && (
+              <Button
+                icon={<SaveRegular />}
+                appearance="primary"
+                onClick={onSaveToReport}
+              >
+                Save To Report
+              </Button>
+            )}
+          </>
         )}
       </div>
 

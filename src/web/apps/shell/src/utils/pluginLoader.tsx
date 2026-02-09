@@ -1,9 +1,7 @@
-import React from 'react';
-import {
-  __federation_method_getRemote as getRemote,
-  __federation_method_setRemote as setRemote,
-  __federation_method_unwrapDefault as unwrapDefault,
-} from 'virtual:__federation__';
+import React from "react";
+import * as ReactIs from "react-is";
+
+import { registerRemotes, loadRemote } from "@module-federation/enhanced/runtime";
 
 export interface RemotePlugin {
   remoteEntry: string;
@@ -11,35 +9,57 @@ export interface RemotePlugin {
   module: string;
 }
 
+function assertIsReactComponent(
+  value: unknown,
+  key?: string
+): asserts value is React.ComponentType<any> {
+  if (
+    typeof value === 'function' ||
+    ReactIs.isValidElementType(value)
+  ) {
+    return;
+  }
+
+  throw new Error(
+    `Remote${key ? ` "${key}"` : ''} did not resolve to a React component`
+  );
+}
+
 // Module Federation runtime helper using official virtual:__federation__ API
 export const loadRemoteModule = async (
   remoteEntry: string,
   scope: string,
-  module: string
+  module: string,
 ): Promise<React.ComponentType<any>> => {
-  console.log('[PluginLoader] Loading remote module:', { remoteEntry, scope, module });
+  console.log("[PluginLoader] Loading remote module:", {
+    remoteEntry,
+    scope,
+    module,
+  });
 
   try {
-    // Register the remote with vite-plugin-federation
-    setRemote(scope, {
-      url: remoteEntry + `?t=${Date.now()}`, // Cache busting
-      format: 'esm',
-      from: 'vite',
-    });
+    registerRemotes([
+      {
+        name: scope,
+        entry: remoteEntry,
+        type: "esm"
+      },
+    ]);
 
-    console.log('[PluginLoader] Remote registered:', scope);
+    console.log("[PluginLoader] Remote registered:", scope);
 
     // Get the remote module using the federation API
-    const remoteModule = await getRemote(scope, module);
-    console.log('[PluginLoader] Remote module fetched');
+    const remoteModule = await loadRemote<unknown>(`${scope}/${module}`);
+    console.log("[PluginLoader] Remote module fetched");
 
     // Unwrap to get the actual component
-    const Component = await unwrapDefault(remoteModule);
-    console.log('[PluginLoader] Module loaded successfully');
+    const Component = typeof remoteModule === "object" && remoteModule !== null && "default" in remoteModule ? remoteModule.default : remoteModule;
+    assertIsReactComponent(Component);
+    console.log("[PluginLoader] Module loaded successfully");
 
-    return Component as React.ComponentType<any>;
+    return Component;
   } catch (error) {
-    console.error('[PluginLoader] Failed to load remote module:', error);
+    console.error("[PluginLoader] Failed to load remote module:", error);
     throw error;
   }
 };
@@ -63,7 +83,8 @@ export const PluginLoader: React.FC<PluginLoaderProps> = ({
   onLoad,
   onError,
 }) => {
-  const [Component, setComponent] = React.useState<React.ComponentType<any> | null>(null);
+  const [Component, setComponent] =
+    React.useState<React.ComponentType<any> | null>(null);
   const [error, setError] = React.useState<Error | null>(null);
 
   React.useEffect(() => {
@@ -71,13 +92,17 @@ export const PluginLoader: React.FC<PluginLoaderProps> = ({
 
     const load = async () => {
       try {
-        const LoadedComponent = await loadRemoteModule(remoteEntry, scope, module);
+        const LoadedComponent = await loadRemoteModule(
+          remoteEntry,
+          scope,
+          module,
+        );
         if (mounted) {
           setComponent(() => LoadedComponent);
           onLoad?.();
         }
       } catch (err) {
-        const error = err instanceof Error ? err : new Error('Unknown error');
+        const error = err instanceof Error ? err : new Error("Unknown error");
         if (mounted) {
           setError(error);
           onError?.(error);
@@ -94,7 +119,7 @@ export const PluginLoader: React.FC<PluginLoaderProps> = ({
 
   if (error) {
     return (
-      <div style={{ padding: '20px', color: 'red' }}>
+      <div style={{ padding: "20px", color: "red" }}>
         <h3>Failed to load plugin</h3>
         <p>{error.message}</p>
       </div>
@@ -103,7 +128,7 @@ export const PluginLoader: React.FC<PluginLoaderProps> = ({
 
   if (!Component) {
     return (
-      <div style={{ padding: '20px' }}>
+      <div style={{ padding: "20px" }}>
         <p>Loading plugin...</p>
       </div>
     );

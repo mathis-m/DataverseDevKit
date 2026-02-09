@@ -1,29 +1,45 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import federation from '@originjs/vite-plugin-federation';
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { federation } from "@module-federation/vite";
+import { dependencies } from "./package.json";
 
 export default defineConfig({
   plugins: [
-    react(),
     federation({
-      name: 'shell',
-      remotes: {},
+      name: "shell",
       shared: {
-        react: { version: '18.3.1' },
-        'react-dom': { version: '18.3.1' },
-        '@fluentui/react-components': {},
-        '@fluentui/react-icons': {},
-        '@ddk/host-sdk': {},
+        react: {
+          singleton: true,
+          requiredVersion: dependencies.react,
+        },
+        "react-dom": {
+          singleton: true,
+          requiredVersion: dependencies["react-dom"],
+        },
+        "@fluentui/react-components": {
+          singleton: true,
+          requiredVersion: dependencies["@fluentui/react-components"],
+        },
+        "@fluentui/react-icons": {
+          singleton: true,
+          requiredVersion: dependencies["@fluentui/react-icons"],
+        },
+        "@ddk/host-sdk": {
+          singleton: true,
+          requiredVersion: dependencies["@ddk/host-sdk"],
+        },
       },
+      dts: false,
     }),
+    react(),
   ],
   build: {
-    target: 'esnext',
+    target: "esnext",
     minify: false,
     cssCodeSplit: false,
     rollupOptions: {
       output: {
-        format: 'esm',
+        format: "esm",
       },
     },
   },
@@ -32,9 +48,10 @@ export default defineConfig({
     strictPort: true,
     cors: true,
     headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
-      'Access-Control-Allow-Headers': 'X-Requested-With, content-type, Authorization',
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+      "Access-Control-Allow-Headers":
+        "X-Requested-With, content-type, Authorization",
     },
   },
 });

@@ -81,6 +81,10 @@ src/plugins/*/dist/
 # Plugins copied to Host wwwroot during build
 src/dotnet/Host/wwwroot/plugins/
 
+# Shell UI build outputs
+src/dotnet/Host/wwwroot/assets/
+src/dotnet/Host/wwwroot/index.html
+
 # -------------------------
 # Environment & Config
 # -------------------------

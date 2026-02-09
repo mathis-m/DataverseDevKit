@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<TargetFramework Condition="$([MSBuild]::IsOSPlatform('windows'))">net10.0-windows10.0.19041.0</TargetFramework>
@@ -43,12 +43,6 @@
 		
 		<!-- Custom Fonts -->
 		<MauiFont Include="Resources\Fonts\*" />
-
-		<!-- Raw Assets (also remove the "Resources\Raw" prefix) -->
-		<MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
-		
-		<!-- HybridWebView wwwroot files -->
-		<MauiAsset Include="wwwroot\**" LogicalName="wwwroot\%(RecursiveDir)%(Filename)%(Extension)" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -65,6 +59,13 @@
 		<ProjectReference Include="..\Shared\DataverseDevKit.Shared.csproj" />
 	</ItemGroup>
 
+	<!-- Shell UI Integration -->
+	<PropertyGroup>
+		<WorkspaceRootPath>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\..'))</WorkspaceRootPath>
+		<ShellUiPath>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\..\src\web\apps\shell'))</ShellUiPath>
+		<WwwrootPath>$(MSBuildProjectDirectory)\wwwroot</WwwrootPath>
+	</PropertyGroup>
+
 	<!-- Plugin Integration -->
 	<PropertyGroup>
 		<PluginsSourcePath>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\plugins'))</PluginsSourcePath>
@@ -72,34 +73,68 @@
 		<CopyPluginsScript>$(MSBuildProjectDirectory)\scripts\copy-plugins.ps1</CopyPluginsScript>
 	</PropertyGroup>
 
+	<!-- Build and copy shell UI to wwwroot -->
+	<Target Name="BuildAndCopyShellUI" BeforeTargets="BeforeBuild">
+		<Message Importance="high" Text="Building Shell UI from: $(ShellUiPath); workspace root: $(WorkspaceRootPath)" />
+		
+		<!-- Install dependencies if node_modules doesn't exist -->
+		<Exec Command="pnpm install" WorkingDirectory="$(WorkspaceRootPath)" Condition="Exists('$(WorkspaceRootPath)\package.json') AND !Exists('$(WorkspaceRootPath)\node_modules')" />
+		
+		<!-- Build the shell UI using root package.json script -->
+		<Exec Command="pnpm build:shell" WorkingDirectory="$(WorkspaceRootPath)" Condition="Exists('$(WorkspaceRootPath)\package.json')" />
+		
+		<!-- Copy built shell UI assets to wwwroot root (excluding plugins subdirectory) -->
+		<ItemGroup>
+			<ShellUiBuildFiles Include="$(ShellUiPath)\dist\**\*.*" />
+		</ItemGroup>
+		
+		<Copy SourceFiles="@(ShellUiBuildFiles)" DestinationFolder="$(WwwrootPath)\%(RecursiveDir)" SkipUnchangedFiles="true" Condition="Exists('$(ShellUiPath)\dist')" />
+		
+		<Message Importance="high" Text="Shell UI built and copied to: $(WwwrootPath)" />
+	</Target>
+
 	<!-- Build and copy plugins to wwwroot -->
-	<Target Name="BuildAndCopyPlugins" BeforeTargets="Build">
+	<Target Name="BuildAndCopyPlugins" BeforeTargets="BeforeBuild" DependsOnTargets="BuildAndCopyShellUI">
 		<Message Importance="high" Text="Building PluginHost..." />
 		
 		<!-- Build the PluginHost project -->
-		<Exec Command="dotnet build ..\PluginRuntime\DataverseDevKit.PluginHost.csproj --configuration $(Configuration)"
-		      WorkingDirectory="$(MSBuildProjectDirectory)"
-		      ContinueOnError="true" />
+		<Exec Command="dotnet build ..\PluginRuntime\DataverseDevKit.PluginHost.csproj --configuration $(Configuration)" WorkingDirectory="$(MSBuildProjectDirectory)" ContinueOnError="true" />
 		
 		<Message Importance="high" Text="Building plugins from: $(PluginsSourcePath)" />
 		
 		<!-- Build all plugins if solution exists -->
-		<Exec Command="dotnet build Plugins.slnx --configuration $(Configuration)"
-		      WorkingDirectory="$(PluginsSourcePath)"
-		      Condition="Exists('$(PluginsSourcePath)\Plugins.slnx')"
-		      ContinueOnError="true" />
+		<Exec Command="dotnet build Plugins.slnx --configuration $(Configuration)" WorkingDirectory="$(PluginsSourcePath)" Condition="Exists('$(PluginsSourcePath)\Plugins.slnx')" ContinueOnError="true" />
 
 		<!-- Create plugins output directory -->
 		<MakeDir Directories="$(PluginsWwwrootPath)" />
 
 		<!-- Use PowerShell script for copying -->
-		<Exec Command="powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(CopyPluginsScript)&quot; -SourcePath &quot;$(PluginsSourcePath)&quot; -TargetPath &quot;$(PluginsWwwrootPath)&quot;"
-		      Condition="Exists('$(CopyPluginsScript)')" />
+		<Exec Command="powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(CopyPluginsScript)&quot; -SourcePath &quot;$(PluginsSourcePath)&quot; -TargetPath &quot;$(PluginsWwwrootPath)&quot;" Condition="Exists('$(CopyPluginsScript)')" />
 	</Target>
+
+    <Target Name="AddDynamicWwwRootFiles" BeforeTargets="BeforeBuild" DependsOnTargets="BuildAndCopyPlugins">
+        <ItemGroup>
+			<!-- We need to use this helper item in order to properly assign LogicalName metadata in a target -->
+		 	<DynamicFiles Include="wwwroot\**" />
+            <MauiAsset Include="@(DynamicFiles)" LogicalName="wwwroot\%(RecursiveDir)%(Filename)%(Extension)" />
+        </ItemGroup>
+    </Target>
 
 	<!-- Clean plugins from wwwroot -->
 	<Target Name="CleanPlugins" AfterTargets="Clean">
 		<RemoveDir Directories="$(PluginsWwwrootPath)" Condition="Exists('$(PluginsWwwrootPath)')" />
+	</Target>
+
+	<!-- Clean shell UI from wwwroot -->
+	<Target Name="CleanShellUI" AfterTargets="Clean">
+		<!-- Remove shell UI files but preserve plugins folder and dev-redirect.html -->
+		<ItemGroup>
+			<ShellUIFilesToDelete Include="$(WwwrootPath)\**\*.*" Exclude="$(WwwrootPath)\plugins\**\*.*;$(WwwrootPath)\dev-redirect.html" />
+		</ItemGroup>
+		<Delete Files="@(ShellUIFilesToDelete)" />
+		
+		<!-- Clean the shell UI dist folder -->
+		<RemoveDir Directories="$(ShellUiPath)\dist" Condition="Exists('$(ShellUiPath)\dist')" />
 	</Target>
 
 </Project>

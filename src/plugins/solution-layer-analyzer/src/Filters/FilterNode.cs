@@ -44,6 +44,7 @@ public abstract class LayerFilterNode
 /// <summary>
 /// String comparison operators for attribute filters.
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum StringOperator
 {
     Equals,
@@ -59,6 +60,7 @@ public enum StringOperator
 /// <summary>
 /// Attribute targets for filtering.
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum AttributeTarget
 {
     LogicalName,
@@ -351,6 +353,7 @@ public sealed class HasRelevantChangesFilterNode : FilterNode
 /// <summary>
 /// Specifies how target solutions are determined for attribute diff comparison.
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum AttributeDiffTargetMode
 {
     /// <summary>
@@ -367,6 +370,7 @@ public enum AttributeDiffTargetMode
 /// <summary>
 /// Specifies how multiple attribute names are matched when checking for differences.
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum AttributeMatchLogic
 {
     /// <summary>
